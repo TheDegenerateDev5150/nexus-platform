@@ -20,6 +20,12 @@
 .env.local
 .env*.local
 
+# python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -47,3 +53,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Cesium — generated at build from node_modules, do not commit
+/public/cesium/
