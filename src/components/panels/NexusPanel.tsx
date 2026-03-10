@@ -238,15 +238,16 @@ function AlertCard({ alert, selected, onSelect }: { alert: NexusAlert; selected:
   const fly = () => dataBus.emit("cameraGoTo", { lat: alert.lat, lon: alert.lng, alt: 400000, distance: 700000 });
 
   return (
-    <div onClick={onSelect} style={{
-      background: selected ? cfg.bg : "transparent",
-      border: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
-      borderLeft: `3px solid ${cfg.fg}`,
-      borderRadius: "var(--radius-md)", padding: "9px 10px", marginBottom: 5, cursor: "pointer",
-      boxShadow: selected && alert.level >= 8 ? `0 0 16px ${cfg.glow}` : "none",
-      opacity: alert.acknowledged && !selected ? 0.45 : 1,
-      transition: "all 0.12s ease",
-    }}>
+<div onClick={onSelect} style={{
+  background: selected ? cfg.bg : "transparent",
+  // On remplace le shorthand 'border' par les propriétés détaillées
+  borderTop: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
+  borderRight: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
+  borderBottom: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
+  borderLeft: `3px solid ${cfg.fg}`, // Ton borderLeft reste prioritaire et propre
+  padding: "10px", // Optionnel, ajuste selon ton design
+  cursor: "pointer"
+}}>
       {/* Row 1 — level · zone · confidence · time */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
         <span style={{ fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: 15, color: cfg.fg, background: cfg.bg, border: `1px solid ${cfg.fg}44`, borderRadius: 4, padding: "0 6px", flexShrink: 0 }}>{alert.level}</span>
