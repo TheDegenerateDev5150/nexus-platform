@@ -1,3 +1,5 @@
+"use client";
+
 import dynamic from "next/dynamic";
 
 const GlobeView = dynamic(() => import("@/core/globe/GlobeView"), {
