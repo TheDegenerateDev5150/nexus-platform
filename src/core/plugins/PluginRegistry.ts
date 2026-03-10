@@ -23,6 +23,10 @@ class PluginRegistry {
         return Array.from(this.plugins.values());
     }
 
+    getByCategory(category: string): WorldPlugin[] {
+        return this.getAll().filter((p) => p.category === category);
+    }
+
     has(pluginId: string): boolean {
         return this.plugins.has(pluginId);
     }

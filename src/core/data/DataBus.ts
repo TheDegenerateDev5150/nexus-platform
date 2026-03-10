@@ -17,6 +17,8 @@ class DataBus {
             this.listeners.set(event, new Set());
         }
         this.listeners.get(event)!.add(handler as EventHandler<unknown>);
+
+        // Return unsubscribe function
         return () => {
             this.listeners.get(event)?.delete(handler as EventHandler<unknown>);
         };
