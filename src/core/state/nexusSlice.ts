@@ -1,7 +1,3 @@
-/**
- * NEXUS Zustand Slice v3 — Unified intelligence platform state
- * Single source of truth for all NEXUS data: alerts, signals, sources, markets, swarm, reports
- */
 import type { StateCreator } from "zustand";
 import type { AppStore } from "./store";
 import type { NexusEvent, SourceHealth, AgentTask } from "@/nexus/types";
@@ -95,7 +91,9 @@ export interface IntelReport {
 
 // ─── Mock data ────────────────────────────────────────────────
 
-const NOW = () => new Date();
+// Fixed epoch for mock data — keeps server and client renders identical (no hydration mismatch)
+const BASE_EPOCH = 1741800000000; // 2025-03-12 12:00:00 UTC — immutable
+const ago = (ms: number) => new Date(BASE_EPOCH - ms);
 
 const MOCK_ALERTS: NexusAlert[] = [
   {
@@ -113,7 +111,7 @@ const MOCK_ALERTS: NexusAlert[] = [
     ],
     confidence: 94,
     similarEvent: "7 Oct 2023 — 78%",
-    timestamp: new Date(Date.now() - 5*60000),
+    timestamp: ago(5*60000),
     acknowledged: false,
     swarmActive: true,
     correlation: { spatial: 0.92, temporal: 0.88, semantic: 0.95, behavioral: 0.87, historical: 0.82, sourceDiv: 0.97 },
@@ -135,7 +133,7 @@ const MOCK_ALERTS: NexusAlert[] = [
     ],
     confidence: 81,
     similarEvent: "Août 2022 — 71%",
-    timestamp: new Date(Date.now() - 14*60000),
+    timestamp: ago(14*60000),
     acknowledged: false,
     swarmActive: false,
     correlation: { spatial: 0.84, temporal: 0.79, semantic: 0.88, behavioral: 0.75, historical: 0.71, sourceDiv: 0.83 },
@@ -155,7 +153,7 @@ const MOCK_ALERTS: NexusAlert[] = [
     ],
     confidence: 73,
     similarEvent: null,
-    timestamp: new Date(Date.now() - 32*60000),
+    timestamp: ago(32*60000),
     acknowledged: false,
     swarmActive: false,
     correlation: { spatial: 0.76, temporal: 0.71, semantic: 0.69, behavioral: 0.62, historical: 0.55, sourceDiv: 0.72 },
@@ -172,7 +170,7 @@ const MOCK_ALERTS: NexusAlert[] = [
     ],
     confidence: 68,
     similarEvent: "Fév 2022 — 64%",
-    timestamp: new Date(Date.now() - 53*60000),
+    timestamp: ago(53*60000),
     acknowledged: true,
     swarmActive: false,
     correlation: { spatial: 0.70, temporal: 0.65, semantic: 0.60, behavioral: 0.58, historical: 0.64, sourceDiv: 0.60 },
@@ -191,7 +189,7 @@ const MOCK_ALERTS: NexusAlert[] = [
     ],
     confidence: 61,
     similarEvent: "Déc 2023 — 83%",
-    timestamp: new Date(Date.now() - 77*60000),
+    timestamp: ago(77*60000),
     acknowledged: true,
     swarmActive: false,
     correlation: { spatial: 0.65, temporal: 0.60, semantic: 0.72, behavioral: 0.55, historical: 0.83, sourceDiv: 0.58 },
@@ -203,26 +201,26 @@ const MOCK_ALERTS: NexusAlert[] = [
 ];
 
 const MOCK_LIVE_SIGNALS: LiveSignal[] = [
-  { id: "ls-1", source: "ADS-B", icon: "✈️", text: "B-52H — Dyess AFB décollage non planifié", zone: "Texas", confidence: 0.91, timestamp: new Date(Date.now()-90000), level: 7 },
-  { id: "ls-2", source: "Telegram", icon: "📡", text: "Canal @IDF_Updates: « מצב חירום »", zone: "Tel Aviv", confidence: 0.88, timestamp: new Date(Date.now()-95000), level: 8 },
-  { id: "ls-3", source: "GPS Jam", icon: "⚡", text: "NAC dégradé 47 aéronefs — Gaza-Liban rayon 180km", zone: "Liban", confidence: 0.92, timestamp: new Date(Date.now()-110000), level: 7 },
-  { id: "ls-4", source: "Twitter/X", icon: "📢", text: "+847% mentions 'explosion' Tel Aviv en 4min", zone: "Tel Aviv", confidence: 0.85, timestamp: new Date(Date.now()-125000), level: 8 },
-  { id: "ls-5", source: "NORAD TLE", icon: "🛰️", text: "KH-11 USA-245 survol zone frappe +2 passages", zone: "Irak/Iran", confidence: 0.95, timestamp: new Date(Date.now()-140000), level: 6 },
-  { id: "ls-6", source: "NASA VIIRS", icon: "🌑", text: "Zone dark 340km² — secteur nord Gaza", zone: "Gaza", confidence: 0.87, timestamp: new Date(Date.now()-160000), level: 7 },
-  { id: "ls-7", source: "AIS", icon: "🚢", text: "MAERSK SENDAI AIS dark — Mer Rouge zone Houthis", zone: "Mer Rouge", confidence: 0.88, timestamp: new Date(Date.now()-200000), level: 5 },
-  { id: "ls-8", source: "GDELT", icon: "📰", text: "GDELT surge: 'strike' 'Israel' 4200 articles/15min", zone: "Global", confidence: 0.75, timestamp: new Date(Date.now()-240000), level: 6 },
-  { id: "ls-9", source: "ADS-B Absence", icon: "🔇", text: "Void ADS-B 340km³ — Gulf approach corridor", zone: "Golfe Persique", confidence: 0.94, timestamp: new Date(Date.now()-270000), level: 8 },
-  { id: "ls-10", source: "Brent", icon: "🛢️", text: "Brent spike +$11.4 en 8min — achat panique", zone: "Marchés", confidence: 0.88, timestamp: new Date(Date.now()-310000), level: 7 },
-  { id: "ls-11", source: "TikTok CV", icon: "📹", text: "CV smoke+military detected — 3 vidéos géolocalisées", zone: "Tel Aviv", confidence: 0.84, timestamp: new Date(Date.now()-350000), level: 7 },
-  { id: "ls-12", source: "Jets Privés", icon: "✈️", text: "Abramovich G650ER Dubai → Dubaï → Inconnu", zone: "Moscou", confidence: 0.71, timestamp: new Date(Date.now()-420000), level: 4 },
+  { id: "ls-1", source: "ADS-B", icon: "✈️", text: "B-52H — Dyess AFB décollage non planifié", zone: "Texas", confidence: 0.91, timestamp: ago(90000), level: 7 },
+  { id: "ls-2", source: "Telegram", icon: "📡", text: "Canal @IDF_Updates: « מצב חירום »", zone: "Tel Aviv", confidence: 0.88, timestamp: ago(95000), level: 8 },
+  { id: "ls-3", source: "GPS Jam", icon: "⚡", text: "NAC dégradé 47 aéronefs — Gaza-Liban rayon 180km", zone: "Liban", confidence: 0.92, timestamp: ago(110000), level: 7 },
+  { id: "ls-4", source: "Twitter/X", icon: "📢", text: "+847% mentions 'explosion' Tel Aviv en 4min", zone: "Tel Aviv", confidence: 0.85, timestamp: ago(125000), level: 8 },
+  { id: "ls-5", source: "NORAD TLE", icon: "🛰️", text: "KH-11 USA-245 survol zone frappe +2 passages", zone: "Irak/Iran", confidence: 0.95, timestamp: ago(140000), level: 6 },
+  { id: "ls-6", source: "NASA VIIRS", icon: "🌑", text: "Zone dark 340km² — secteur nord Gaza", zone: "Gaza", confidence: 0.87, timestamp: ago(160000), level: 7 },
+  { id: "ls-7", source: "AIS", icon: "🚢", text: "MAERSK SENDAI AIS dark — Mer Rouge zone Houthis", zone: "Mer Rouge", confidence: 0.88, timestamp: ago(200000), level: 5 },
+  { id: "ls-8", source: "GDELT", icon: "📰", text: "GDELT surge: 'strike' 'Israel' 4200 articles/15min", zone: "Global", confidence: 0.75, timestamp: ago(240000), level: 6 },
+  { id: "ls-9", source: "ADS-B Absence", icon: "🔇", text: "Void ADS-B 340km³ — Gulf approach corridor", zone: "Golfe Persique", confidence: 0.94, timestamp: ago(270000), level: 8 },
+  { id: "ls-10", source: "Brent", icon: "🛢️", text: "Brent spike +$11.4 en 8min — achat panique", zone: "Marchés", confidence: 0.88, timestamp: ago(310000), level: 7 },
+  { id: "ls-11", source: "TikTok CV", icon: "📹", text: "CV smoke+military detected — 3 vidéos géolocalisées", zone: "Tel Aviv", confidence: 0.84, timestamp: ago(350000), level: 7 },
+  { id: "ls-12", source: "Jets Privés", icon: "✈️", text: "Abramovich G650ER Dubai → Dubaï → Inconnu", zone: "Moscou", confidence: 0.71, timestamp: ago(420000), level: 4 },
 ];
 
 const MOCK_AGENTS: AgentTask[] = [
-  { id: "task-alert-1-collect",  eventId: "alert-1", type: "collect",   status: "done",    startTime: new Date(Date.now()-180000), endTime: new Date(Date.now()-50000),  result: "347 signaux archivés — caches ADS-B/AIS/social capturés" },
-  { id: "task-alert-1-archive",  eventId: "alert-1", type: "archive",   status: "done",    startTime: new Date(Date.now()-175000), endTime: new Date(Date.now()-45000),  result: "Archive immuable créée — SHA256 vérifié, 12.4 MB" },
-  { id: "task-alert-1-translate",eventId: "alert-1", type: "translate", status: "running", startTime: new Date(Date.now()-60000),  result: undefined },
-  { id: "task-alert-1-geolocate",eventId: "alert-1", type: "geolocate", status: "running", startTime: new Date(Date.now()-45000),  result: undefined },
-  { id: "task-alert-1-report",   eventId: "alert-1", type: "report",    status: "pending", startTime: new Date(Date.now()-10000),  result: undefined },
+  { id: "task-alert-1-collect",  eventId: "alert-1", type: "collect",   status: "done",    startTime: ago(180000), endTime: ago(50000),  result: "347 signaux archivés — caches ADS-B/AIS/social capturés" },
+  { id: "task-alert-1-archive",  eventId: "alert-1", type: "archive",   status: "done",    startTime: ago(175000), endTime: ago(45000),  result: "Archive immuable créée — SHA256 vérifié, 12.4 MB" },
+  { id: "task-alert-1-translate",eventId: "alert-1", type: "translate", status: "running", startTime: ago(60000),  result: undefined },
+  { id: "task-alert-1-geolocate",eventId: "alert-1", type: "geolocate", status: "running", startTime: ago(45000),  result: undefined },
+  { id: "task-alert-1-report",   eventId: "alert-1", type: "report",    status: "pending", startTime: ago(10000),  result: undefined },
 ];
 
 const MOCK_ECONOMIC: EconomicIndicator[] = [
@@ -293,7 +291,7 @@ export const createNexusSlice: StateCreator<AppStore, [], [], NexusSlice> = (set
   nexusLiveEvents: [],
   nexusSourceHealth: [],
   nexusSignalCount: MOCK_LIVE_SIGNALS.length,
-  nexusLastUpdate: new Date(),
+  nexusLastUpdate: new Date(BASE_EPOCH),
   nexusReports: [],
   nexusTickerPaused: false,
   toggleNexusPanel: () => set(s => ({ nexusPanelOpen: !s.nexusPanelOpen })),
