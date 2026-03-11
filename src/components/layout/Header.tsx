@@ -91,8 +91,8 @@ export function Header() {
         <header className="header glass-panel">
             <div className="header__brand">
                 <div>
-                    <div className="header__logo">WorldWideView</div>
-                    <div className="header__subtitle">Geospatial Intelligence</div>
+                    <div className="header__logo">NEXUS</div>
+                    <div className="header__subtitle">Geospatial Intelligence Platform</div>
                 </div>
                 <div style={{ marginLeft: "var(--space-xl)" }}>
                     <SearchBar />

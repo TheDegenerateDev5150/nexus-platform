@@ -9,7 +9,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "WorldWideView | Geospatial Intelligence",
+  title: "NEXUS | Geospatial Intelligence Platform",
   description: "Next-generation, open-source geospatial intelligence platform.",
   icons: {
     icon: "/favicon.ico",
