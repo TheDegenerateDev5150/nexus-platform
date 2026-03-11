@@ -5,8 +5,6 @@ import {
     VerticalOrigin,
     HorizontalOrigin,
     Math as CesiumMath,
-    Ellipsoid,
-    BoundingSphere,
     PointPrimitiveCollection,
     BillboardCollection,
     LabelCollection,
@@ -14,7 +12,6 @@ import {
 } from "cesium";
 import type { Viewer as CesiumViewer } from "cesium";
 import type { GeoEntity, CesiumEntityOptions } from "@/core/plugins/PluginTypes";
-import { useStore } from "@/core/state/store";
 
 export interface AnimatableItem {
     primitive: any;
@@ -33,7 +30,17 @@ export interface AnimatableItem {
  * Resolve entity color from options, defaulting to cyan.
  */
 export function getEntityColor(options: CesiumEntityOptions): Color {
-    return options.color ? Color.fromCssColorString(options.color) : Color.CYAN;
+    if (!options.color) return Color.CYAN;
+    try {
+        return Color.fromCssColorString(options.color);
+    } catch {
+        return Color.CYAN;
+    }
+}
+
+function safeColor(hex: string | undefined, fallback: Color): Color {
+    if (!hex) return fallback;
+    try { return Color.fromCssColorString(hex); } catch { return fallback; }
 }
 
 /**
@@ -74,6 +81,7 @@ export function renderEntities(
         currentIds.add(entity.id);
         const position = Cartesian3.fromDegrees(entity.longitude, entity.latitude, entity.altitude || 0);
         const color = getEntityColor(options);
+        const outlineColor = safeColor(options.outlineColor, Color.BLACK);
         const clickId = { _wwvEntity: entity };
 
         let item = existingMap.get(entity.id);
@@ -100,7 +108,7 @@ export function renderEntities(
             item.basePosition = undefined;
             item.velocityVector = undefined;
             item.baseColor = color;
-            item.baseOutlineColor = options.outlineColor ? Color.fromCssColorString(options.outlineColor) : Color.BLACK;
+            item.baseOutlineColor = outlineColor;
 
             if (!Color.equals(item.primitive.color, color)) {
                 item.primitive.color = color;
@@ -148,7 +156,7 @@ export function renderEntities(
             } else {
                 addedPrimitive = points.add({
                     position, pixelSize: options.size || 6, color,
-                    outlineColor: options.outlineColor ? Color.fromCssColorString(options.outlineColor) : Color.BLACK,
+                    outlineColor,
                     outlineWidth: options.outlineWidth || 1,
                     scaleByDistance: new NearFarScalar(1e3, 1.0, 1e7, 0.4), id: clickId,
                     disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -175,7 +183,7 @@ export function renderEntities(
                 posRef: position,
                 options,
                 baseColor: color,
-                baseOutlineColor: options.outlineColor ? Color.fromCssColorString(options.outlineColor) : Color.BLACK,
+                baseOutlineColor: outlineColor,
                 lastHighlightState: 'normal'
             };
             existingMap.set(entity.id, item);
