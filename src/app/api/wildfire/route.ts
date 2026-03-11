@@ -83,7 +83,7 @@ export async function GET() {
 
         const res = await fetch(url, {
             next: { revalidate: 300 },
-        });
+        } as RequestInit);
 
         if (!res.ok) {
             if (cachedData) return NextResponse.json(cachedData);

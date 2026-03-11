@@ -10,9 +10,12 @@ export function PanelToggleArrows() {
     const toggleLeftSidebar = useStore((s) => s.toggleLeftSidebar);
     const toggleConfigPanel = useStore((s) => s.toggleConfigPanel);
 
-    const filterCount = useStore((s) =>
-        Object.values(s.filters).reduce((sum, pf) => sum + Object.keys(pf).length, 0)
-    );
+    const filterCount = useStore((s) => {
+        const f = s.filters as Record<string, Record<string, unknown>>;
+        let count = 0;
+        for (const pf of Object.values(f)) count += Object.keys(pf).length;
+        return count;
+    });
 
     return (
         <>

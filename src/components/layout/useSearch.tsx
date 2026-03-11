@@ -47,7 +47,7 @@ function searchEntities(
     const entitiesByPlugin = useStore.getState().entitiesByPlugin;
     const sections: SearchSection[] = [];
 
-    for (const [pluginId, entities] of Object.entries(entitiesByPlugin)) {
+    for (const [pluginId, entities] of Object.entries(entitiesByPlugin) as [string, import("@/core/plugins/PluginTypes").GeoEntity[]][]) {
         const managed = pluginManager.getPlugin(pluginId);
         if (!managed || !layers[pluginId]?.enabled) continue;
 

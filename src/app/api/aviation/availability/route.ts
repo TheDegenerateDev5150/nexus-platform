@@ -23,7 +23,7 @@ export async function GET() {
             .order("timestamp", { ascending: false })
             .limit(1);
 
-        const ranges = [];
+        const ranges: { start: number; end: number }[] = [];
 
         if (minData && minData.length > 0 && maxData && maxData.length > 0) {
             ranges.push({

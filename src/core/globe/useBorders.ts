@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import {
     GeoJsonDataSource,
     Color,
+    ColorMaterialProperty,
     JulianDate,
     BoundingSphere,
     Cartographic,
@@ -118,7 +119,7 @@ function addLabelsAndPolylines(ds: GeoJsonDataSource): void {
         entity.polyline = new PolylineGraphics({
             positions: [...positions, positions[0]],
             width: 2,
-            material: Color.WHITE.withAlpha(0.5),
+            material: new ColorMaterialProperty(Color.WHITE.withAlpha(0.5)),
             clampToGround: true,
             classificationType: ClassificationType.BOTH,
         });

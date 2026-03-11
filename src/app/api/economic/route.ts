@@ -17,7 +17,7 @@ import { NextResponse } from "next/server";
 async function fetchFromAlphaVantage(symbol: string, apiKey: string) {
   try {
     const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`;
-    const res = await fetch(url, { next: { revalidate: 60 } });
+    const res = await fetch(url, { next: { revalidate: 60 } } as RequestInit);
     if (!res.ok) return null;
     const data = await res.json();
     const quote = data["Global Quote"];

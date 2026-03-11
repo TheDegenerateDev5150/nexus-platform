@@ -57,13 +57,13 @@ function ConfidenceBar({ value, color }: { value: number; color: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
       <div style={{ flex: 1, height: 4, background: "#1a2744", borderRadius: 2, overflow: "hidden" }}>
-        <div style={{
+        <div suppressHydrationWarning style={{
           width: `${value}%`, height: "100%",
           background: `linear-gradient(90deg, ${color}88, ${color})`,
           borderRadius: 2, transition: "width 0.6s ease",
         }} />
       </div>
-      <span style={{ fontSize: 10, color, fontFamily: "JetBrains Mono, monospace", minWidth: 28 }}>
+      <span suppressHydrationWarning style={{ fontSize: 10, color, fontFamily: "JetBrains Mono, monospace", minWidth: 28 }}>
         {value}%
       </span>
     </div>
@@ -260,7 +260,10 @@ Briefing exécutif: situation, pattern, vecteur d'escalade 48h, recommandation.`
 
   return (
     <div style={{
-      background: "#060e1c", border: "1px solid #1e3a5f",
+      background: "#060e1c",
+      borderTop: "1px solid #1e3a5f",
+      borderRight: "1px solid #1e3a5f",
+      borderBottom: "1px solid #1e3a5f",
       borderLeft: "3px solid #22d3ee",
       borderRadius: 6, padding: "10px 12px",
     }}>
@@ -409,7 +412,10 @@ function LiveTelegramFeed({ alert }: { alert: NexusAlert }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {messages.map(msg => (
           <div key={msg.id} style={{
-            background: "#0a1628", border: "1px solid #1e3a5f",
+            background: "#0a1628",
+            borderTop: "1px solid #1e3a5f",
+            borderRight: "1px solid #1e3a5f",
+            borderBottom: "1px solid #1e3a5f",
             borderLeft: `3px solid ${biasColor[msg.bias] || "#64748b"}`,
             borderRadius: 4, padding: "7px 9px",
           }}>
@@ -583,14 +589,16 @@ function SignalCard({ signal, index }: {
     private_jets: "#f97316", gdelt: "#6b7280",
   };
   const color = sourceColors[signal.source] || "#22d3ee";
-  const confidence = Math.round(65 + Math.random() * 30); // derived from source weight
+  const confidence = Math.round((signal.confidence || 0.75) * 100);
 
   return (
     <div style={{
       display: "flex", gap: 10, alignItems: "flex-start",
       padding: "8px 10px",
       background: "#060e1c",
-      border: "1px solid #1e3a5f",
+      borderTop: "1px solid #1e3a5f",
+      borderRight: "1px solid #1e3a5f",
+      borderBottom: "1px solid #1e3a5f",
       borderLeft: `3px solid ${color}`,
       borderRadius: 4,
     }}>
@@ -624,9 +632,12 @@ export function EventDetailPanel() {
   const acknowledgeAlert = useStore(s => s.acknowledgeAlert);
   const setNexusTab   = useStore(s => s.setNexusActiveTab);
   const [tab, setTab] = useState<Tab>("signals");
+  const [mounted, setMounted] = useState(false);
   const panelRef      = useRef<HTMLDivElement>(null);
 
   const alert = alerts.find(a => a.id === selectedId);
+
+  useEffect(() => { setMounted(true); }, []);
 
   // Close on Escape
   useEffect(() => {
@@ -637,7 +648,7 @@ export function EventDetailPanel() {
     return () => window.removeEventListener("keydown", handler);
   }, [setSelected]);
 
-  if (!alert) return null;
+  if (!mounted || !alert) return null;
 
   const meta = LEVEL_META[alert.level] || LEVEL_META[5];
 
@@ -817,7 +828,8 @@ export function EventDetailPanel() {
         }}>
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
-              padding: "8px 10px", border: "none", cursor: "pointer",
+              padding: "8px 10px", cursor: "pointer",
+              borderTop: "none", borderLeft: "none", borderRight: "none",
               background: tab === t.id ? "#0a1628" : "transparent",
               borderBottom: tab === t.id ? `2px solid ${meta.color}` : "2px solid transparent",
               color: tab === t.id ? meta.color : "#475569",

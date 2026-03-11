@@ -17,8 +17,8 @@ export async function GET() {
     // Try GPSJam.org API
     const today = new Date().toISOString().split("T")[0];
     const res = await fetch(`https://gpsjam.org/api/v1/interference/${today}`, {
-      next: { revalidate: 1800 }, // 30 min cache
-    });
+      next: { revalidate: 1800 },
+    } as RequestInit);
 
     if (res.ok) {
       const data = await res.json();

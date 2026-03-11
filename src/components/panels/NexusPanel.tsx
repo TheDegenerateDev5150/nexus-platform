@@ -1,3 +1,13 @@
+"use client";
+/**
+ * NEXUS Intelligence Panel v3
+ * ─────────────────────────────────────────────────────────────
+ * The unified command centre. Bloomberg Terminal × Mission Control.
+ * Every signal source, every alert, every agent — one surface.
+ *
+ * Tabs: ALERTES · SIGNAUX · SOURCES · MARCHÉS · SWARM · RAPPORT · BOT
+ */
+
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useStore } from "@/core/state/store";
 import { dataBus } from "@/core/data/DataBus";
@@ -6,6 +16,8 @@ import type { AgentTask } from "@/nexus/types";
 import TelegramIntelPanel from "./TelegramIntelPanel";
 import { MultiSourcePanel } from "./MultiSourcePanel";
 import { DarkWebPanel } from "./DarkWebPanel";
+
+// ─── Design tokens ────────────────────────────────────────────
 
 const C = {
   10: { fg: "#dc2626", bg: "rgba(220,38,38,0.10)",  label: "EXTINCTION",  glow: "rgba(220,38,38,0.30)"  },

@@ -38,8 +38,14 @@ class CacheLayer {
     }
 
     set(pluginId: string, entities: GeoEntity[], ttlMs: number = 30000): void {
-        const entry: CacheEntry = { entities, timestamp: Date.now(), ttl: ttlMs };
+        const entry: CacheEntry = {
+            entities,
+            timestamp: Date.now(),
+            ttl: ttlMs,
+        };
         this.memoryCache.set(pluginId, entry);
+
+        // Persist to IndexedDB
         if (this.db) {
             try {
                 const tx = this.db.transaction(this.storeName, "readwrite");
@@ -70,6 +76,7 @@ class CacheLayer {
                 if (!entry || Date.now() - entry.timestamp > entry.ttl) {
                     resolve(null);
                 } else {
+                    // Populate memory cache
                     this.memoryCache.set(pluginId, entry);
                     resolve(entry.entities);
                 }
@@ -84,7 +91,9 @@ class CacheLayer {
             try {
                 const tx = this.db.transaction(this.storeName, "readwrite");
                 tx.objectStore(this.storeName).delete(pluginId);
-            } catch {}
+            } catch {
+                // Ignore
+            }
         }
     }
 
@@ -94,7 +103,9 @@ class CacheLayer {
             try {
                 const tx = this.db.transaction(this.storeName, "readwrite");
                 tx.objectStore(this.storeName).clear();
-            } catch {}
+            } catch {
+                // Ignore
+            }
         }
     }
 }

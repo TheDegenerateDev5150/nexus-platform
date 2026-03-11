@@ -13,6 +13,7 @@ export interface NexusSignalUI {
   icon: string;
   text: string;
   source: string;
+  confidence?: number;
 }
 
 export interface NexusAlert {
