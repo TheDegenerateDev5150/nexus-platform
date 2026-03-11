@@ -1,13 +1,3 @@
-"use client";
-/**
- * NEXUS Intelligence Panel v3
- * ─────────────────────────────────────────────────────────────
- * The unified command centre. Bloomberg Terminal × Mission Control.
- * Every signal source, every alert, every agent — one surface.
- *
- * Tabs: ALERTES · SIGNAUX · SOURCES · MARCHÉS · SWARM · RAPPORT · BOT
- */
-
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useStore } from "@/core/state/store";
 import { dataBus } from "@/core/data/DataBus";
@@ -16,8 +6,6 @@ import type { AgentTask } from "@/nexus/types";
 import TelegramIntelPanel from "./TelegramIntelPanel";
 import { MultiSourcePanel } from "./MultiSourcePanel";
 import { DarkWebPanel } from "./DarkWebPanel";
-
-// ─── Design tokens ────────────────────────────────────────────
 
 const C = {
   10: { fg: "#dc2626", bg: "rgba(220,38,38,0.10)",  label: "EXTINCTION",  glow: "rgba(220,38,38,0.30)"  },
@@ -111,7 +99,7 @@ function LiveTicker() {
               <span style={{ fontSize: 9, color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
                 {sig.text.substring(0, 55)}{sig.text.length > 55 ? "…" : ""}
               </span>
-              <span style={{ fontSize: 8, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginLeft: 2 }}>
+              <span suppressHydrationWarning style={{ fontSize: 8, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginLeft: 2 }}>
                 {rt(sig.timestamp)}
               </span>
               <span style={{ color: "var(--border-medium)", marginLeft: 4 }}>·</span>
@@ -213,7 +201,7 @@ function TabBar({ active, onSelect }: { active: Tab; onSelect: (t: Tab) => void 
           <button key={tab.id} onClick={() => onSelect(tab.id)} style={{
             flexShrink: 0, padding: "6px 6px 5px",
             background: isA ? "var(--bg-primary)" : "transparent",
-            border: "none", borderBottom: isA ? "2px solid var(--accent-cyan)" : "2px solid transparent",
+            borderTop: "none", borderLeft: "none", borderRight: "none", borderBottom: isA ? "2px solid var(--accent-cyan)" : "2px solid transparent",
             borderRadius: 0, cursor: "pointer",
             display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5,
             transition: "all 0.12s ease", minWidth: 42,
@@ -238,16 +226,17 @@ function AlertCard({ alert, selected, onSelect }: { alert: NexusAlert; selected:
   const fly = () => dataBus.emit("cameraGoTo", { lat: alert.lat, lon: alert.lng, alt: 400000, distance: 700000 });
 
   return (
-<div onClick={onSelect} style={{
-  background: selected ? cfg.bg : "transparent",
-  // On remplace le shorthand 'border' par les propriétés détaillées
-  borderTop: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
-  borderRight: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
-  borderBottom: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
-  borderLeft: `3px solid ${cfg.fg}`, // Ton borderLeft reste prioritaire et propre
-  padding: "10px", // Optionnel, ajuste selon ton design
-  cursor: "pointer"
-}}>
+    <div onClick={onSelect} style={{
+      background: selected ? cfg.bg : "transparent",
+      borderTop: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
+      borderRight: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
+      borderBottom: `1px solid ${selected ? cfg.fg+"50" : "var(--border-subtle)"}`,
+      borderLeft: `3px solid ${cfg.fg}`,
+      borderRadius: "var(--radius-md)", padding: "9px 10px", marginBottom: 5, cursor: "pointer",
+      boxShadow: selected && alert.level >= 8 ? `0 0 16px ${cfg.glow}` : "none",
+      opacity: alert.acknowledged && !selected ? 0.45 : 1,
+      transition: "all 0.12s ease",
+    }}>
       {/* Row 1 — level · zone · confidence · time */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
         <span style={{ fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: 15, color: cfg.fg, background: cfg.bg, border: `1px solid ${cfg.fg}44`, borderRadius: 4, padding: "0 6px", flexShrink: 0 }}>{alert.level}</span>
@@ -257,7 +246,7 @@ function AlertCard({ alert, selected, onSelect }: { alert: NexusAlert; selected:
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, color: alert.confidence >= 90 ? "#ef4444" : alert.confidence >= 75 ? "#f59e0b" : "var(--accent-cyan)" }}>{alert.confidence}%</div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)" }}>{rt(alert.timestamp)}</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)" }} suppressHydrationWarning>{rt(alert.timestamp)}</div>
         </div>
       </div>
 
@@ -367,10 +356,15 @@ function AlertsTab() {
 
 function SignalsTab() {
   const signals = useStore(s => s.nexusLiveSignals);
+  const [tick, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 10000);
+    return () => clearInterval(id);
+  }, []);
   return (
     <div style={{ padding: "8px 10px" }}>
-      <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)", marginBottom: 8, letterSpacing: "0.06em" }}>
-        LIVE SIGNAL FEED — {signals.length} SIGNAUX · DERNIÈRE MAJ {rt(new Date(Date.now()-10000))}
+      <div suppressHydrationWarning style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)", marginBottom: 8, letterSpacing: "0.06em" }}>
+        LIVE SIGNAL FEED — {signals.length} SIGNAUX · DERNIÈRE MAJ {tick >= 0 ? rt(new Date(Date.now()-10000)) : "—"}
       </div>
       {signals.map(sig => {
         const cfg = lc(sig.level);
@@ -381,12 +375,12 @@ function SignalsTab() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: cfg.fg, fontWeight: 700 }}>[{sig.source}]</span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)" }}>{rt(sig.timestamp)}</span>
+                <span suppressHydrationWarning style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)" }}>{rt(sig.timestamp)}</span>
               </div>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--text-secondary)", lineHeight: 1.4 }}>{sig.icon} {sig.text}</div>
               <div style={{ display: "flex", gap: 6, marginTop: 3 }}>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: "var(--text-muted)" }}>{sig.zone}</span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: cfg.fg }}>conf: {Math.round(sig.confidence*100)}%</span>
+                <span suppressHydrationWarning style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: cfg.fg }}>conf: {Math.round(sig.confidence*100)}%</span>
               </div>
             </div>
           </div>
@@ -510,7 +504,7 @@ function MarketsTab() {
         const isUp = ind.changePercent > 0;
         const ac = ind.anomalyScore >= 0.80 ? "#ef4444" : ind.anomalyScore >= 0.60 ? "#f59e0b" : "#4ade80";
         return (
-          <div key={ind.id} style={{ padding: "7px 8px", marginBottom: 6, background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)", borderLeft: `3px solid ${ac}`, borderRadius: "var(--radius-md)" }}>
+          <div key={ind.id} style={{ padding: "7px 8px", marginBottom: 6, background: "var(--bg-secondary)", borderTop: "1px solid var(--border-subtle)", borderRight: "1px solid var(--border-subtle)", borderBottom: "1px solid var(--border-subtle)", borderLeft: `3px solid ${ac}`, borderRadius: "var(--radius-md)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 5 }}>
               <div>
                 <span style={{ fontWeight: 600, fontSize: 11, color: "var(--text-primary)" }}>{ind.name}</span>
@@ -643,7 +637,7 @@ function SwarmTab() {
               const sc = STATUS_C[task.status];
               const isRunning = task.status === "running";
               return (
-                <div key={task.id} style={{ marginBottom: 5, padding: "6px 8px", background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)", borderLeft: `2px solid ${sc}`, borderRadius: 4 }}>
+                <div key={task.id} style={{ marginBottom: 5, padding: "6px 8px", background: "var(--bg-secondary)", borderTop: "1px solid var(--border-subtle)", borderRight: "1px solid var(--border-subtle)", borderBottom: "1px solid var(--border-subtle)", borderLeft: `2px solid ${sc}`, borderRadius: 4 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isRunning ? 4 : 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <span>{meta.icon}</span>
@@ -698,7 +692,8 @@ function ReportTab() {
             return (
               <button key={alert.id} onClick={() => { generate(alert.id); setSelected(alert.reportId ?? null); }} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "5px 8px",
-                background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)",
+                background: "var(--bg-secondary)",
+                borderTop: "1px solid var(--border-subtle)", borderRight: "1px solid var(--border-subtle)", borderBottom: "1px solid var(--border-subtle)",
                 borderLeft: `2px solid ${cfg.fg}`, borderRadius: 4, cursor: "pointer",
                 textAlign: "left", width: "100%",
               }}>
@@ -717,7 +712,7 @@ function ReportTab() {
       {report && (
         <div>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)", marginBottom: 6, letterSpacing: "0.06em" }}>
-            RAPPORT #{report.id.slice(-8).toUpperCase()} · {report.zone.toUpperCase()} · {new Date(report.generatedAt).toLocaleTimeString("fr")}
+            RAPPORT #{report.id.slice(-8).toUpperCase()} · {report.zone.toUpperCase()}
           </div>
           <div style={{ padding: "8px 10px", background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", marginBottom: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -896,7 +891,7 @@ function TimelineTab() {
                   )}
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-secondary)" }}>{ev.zone}</span>
                 </div>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: "var(--text-muted)" }}>{rt(ev.ts)}</span>
+                <span suppressHydrationWarning style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: "var(--text-muted)" }}>{rt(ev.ts)}</span>
               </div>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)", lineHeight: 1.4 }}>{ev.text}</div>
             </div>
@@ -926,13 +921,20 @@ function MatrixTab() {
     { id: "nightlights", label: "VIRS",  color: "#1e3a5f" },
   ];
 
+  function stableVal(seed: string): number {
+    let h = 5381;
+    for (let i = 0; i < seed.length; i++) h = (h * 33 ^ seed.charCodeAt(i)) >>> 0;
+    return (h % 1000) / 1000;
+  }
+
   function getCellValue(zone: string, sourceId: string): number {
     const alert = alerts.find(a => a.zone.toLowerCase().includes(zone.toLowerCase().split(" ")[0]));
     if (!alert) return 0;
     const sig = alert.signals.find(s => s.source === sourceId);
-    if (sig) return 0.85 + Math.random() * 0.14;
-    if (alert.level >= 7) return 0.3 + Math.random() * 0.3;
-    return Math.random() * 0.2;
+    const v = stableVal(zone + sourceId + alert.level);
+    if (sig) return 0.85 + v * 0.14;
+    if (alert.level >= 7) return 0.3 + v * 0.3;
+    return v * 0.2;
   }
 
   function heatColor(v: number): string {
