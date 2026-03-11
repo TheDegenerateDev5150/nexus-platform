@@ -1,17 +1,3 @@
-/**
- * NEXUS Globe Layer
- * ─────────────────────────────────────────────────────────────
- * Renders NEXUS intelligence events directly onto the CesiumJS globe:
- * - Pulsing concentric rings for active alerts (level-colored)
- * - GPS jamming zone ellipses (orange translucent)
- * - Satellite ground-track polylines
- * - ADS-B void zones (dark red)
- * - Signal epicentre labels
- *
- * Uses Cesium Entity API for declarative management.
- * All entities are prefixed `__nexus_` for easy cleanup.
- */
-
 import { useEffect, useRef } from "react";
 import {
   Color,
@@ -67,14 +53,13 @@ function addAlertEntities(viewer: CesiumViewer, alert: NexusAlert): string[] {
     id: zoneId,
     position: center,
     ellipse: {
-      semiMajorAxis: new CallbackProperty(() => radiusMeters, false) as any,
-      semiMinorAxis: new CallbackProperty(() => radiusMeters, false) as any,
-      material: new CallbackProperty(
-        () => new ColorMaterialProperty(new ConstantProperty(levelColor(alert.level, getPulseAlpha()))),
-        false
+      semiMajorAxis: radiusMeters,
+      semiMinorAxis: radiusMeters,
+      material: new ColorMaterialProperty(
+        new CallbackProperty(() => levelColor(alert.level, getPulseAlpha()), false)
       ) as any,
       outline: true,
-      outlineColor: new CallbackProperty(() => levelColor(alert.level, 0.7), false) as any,
+      outlineColor: new ConstantProperty(levelColor(alert.level, 0.6)),
       outlineWidth: alert.level >= 7 ? 2.5 : 1.5,
       height: 0,
     },
@@ -88,14 +73,13 @@ function addAlertEntities(viewer: CesiumViewer, alert: NexusAlert): string[] {
       id: outerRingId,
       position: center,
       ellipse: {
-        semiMajorAxis: new CallbackProperty(() => radiusMeters * 1.65, false) as any,
-        semiMinorAxis: new CallbackProperty(() => radiusMeters * 1.65, false) as any,
-        material: new CallbackProperty(
-          () => new ColorMaterialProperty(new ConstantProperty(levelColor(alert.level, getOuterPulse(600)))),
-          false
+        semiMajorAxis: radiusMeters * 1.65,
+        semiMinorAxis: radiusMeters * 1.65,
+        material: new ColorMaterialProperty(
+          new CallbackProperty(() => levelColor(alert.level, getOuterPulse(600)), false)
         ) as any,
         outline: true,
-        outlineColor: new CallbackProperty(() => levelColor(alert.level, 0.3), false) as any,
+        outlineColor: new ConstantProperty(levelColor(alert.level, 0.25)),
         outlineWidth: 1,
         height: 0,
       },
@@ -110,14 +94,13 @@ function addAlertEntities(viewer: CesiumViewer, alert: NexusAlert): string[] {
       id: ring3Id,
       position: center,
       ellipse: {
-        semiMajorAxis: new CallbackProperty(() => radiusMeters * 2.4, false) as any,
-        semiMinorAxis: new CallbackProperty(() => radiusMeters * 2.4, false) as any,
-        material: new CallbackProperty(
-          () => new ColorMaterialProperty(new ConstantProperty(levelColor(alert.level, getOuterPulse(1200)))),
-          false
+        semiMajorAxis: radiusMeters * 2.4,
+        semiMinorAxis: radiusMeters * 2.4,
+        material: new ColorMaterialProperty(
+          new CallbackProperty(() => levelColor(alert.level, getOuterPulse(1200)), false)
         ) as any,
         outline: true,
-        outlineColor: new CallbackProperty(() => levelColor(alert.level, 0.15), false) as any,
+        outlineColor: new ConstantProperty(levelColor(alert.level, 0.12)),
         outlineWidth: 1,
         height: 0,
       },
@@ -206,14 +189,14 @@ function addJammingZone(viewer: CesiumViewer, alert: NexusAlert): string[] {
       semiMajorAxis: 180_000,
       semiMinorAxis: 140_000,
       material: new ColorMaterialProperty(
-        new ConstantProperty(Color.fromCssColorString("#f97316").withAlpha(0.07))
+        Color.fromCssColorString("#f97316").withAlpha(0.07)
       ) as any,
       outline: true,
-      outlineColor: Color.fromCssColorString("#f97316").withAlpha(0.4),
+      outlineColor: new ConstantProperty(Color.fromCssColorString("#f97316").withAlpha(0.4)),
       outlineWidth: 1.5,
       height: 12_000,
       extrudedHeight: 25_000,
-      rotation: Math.random() * Math.PI,
+      rotation: (alert.id.charCodeAt(0) % 31) * 0.1,
     },
   });
   return [id];
@@ -234,10 +217,10 @@ function addAbsenceZone(viewer: CesiumViewer, alert: NexusAlert): string[] {
       semiMajorAxis: 280_000,
       semiMinorAxis: 250_000,
       material: new ColorMaterialProperty(
-        new ConstantProperty(Color.fromCssColorString("#7f1d1d").withAlpha(0.08))
+        Color.fromCssColorString("#7f1d1d").withAlpha(0.08)
       ) as any,
       outline: true,
-      outlineColor: Color.fromCssColorString("#ef4444").withAlpha(0.25),
+      outlineColor: new ConstantProperty(Color.fromCssColorString("#ef4444").withAlpha(0.25)),
       outlineWidth: 1,
       height: 0,
     },
@@ -284,9 +267,9 @@ function addDamageZone(
       semiMinorAxis: new CallbackProperty(() => radiusM * 0.85 * (1 + Math.sin(t() * 0.5) * 0.03 * damageIntensity), false),
       material: new ColorMaterialProperty(
         new CallbackProperty(() => cesiumColor.withAlpha(0.08 + 0.04 * Math.sin(t() * 0.7)), false)
-      ),
+      ) as any,
       outline: true,
-      outlineColor: cesiumColor.withAlpha(0.5),
+      outlineColor: new ConstantProperty(cesiumColor.withAlpha(0.5)),
       outlineWidth: 2,
       height: 0,
     },
@@ -306,7 +289,7 @@ function addDamageZone(
       ellipse: {
         semiMajorAxis: radiusM * ring.scale,
         semiMinorAxis: radiusM * ring.scale * 0.85,
-        material: new ColorMaterialProperty(cesiumColor.withAlpha(ring.alpha)),
+        material: new ColorMaterialProperty(cesiumColor.withAlpha(ring.alpha)) as any,
         height: 0,
       },
     });
@@ -345,8 +328,8 @@ function addDamageZone(
     id: `__nexus_dmg_center_${zone.id}`,
     position: center,
     point: {
-      pixelSize: new CallbackProperty(() => 6 + Math.sin(t() * 2) * 2, false) as any,
-      color: new CallbackProperty(() => cesiumColor.withAlpha(0.9), false),
+      pixelSize: 8,
+      color: cesiumColor.withAlpha(0.9),
       outlineColor: Color.WHITE.withAlpha(0.6),
       outlineWidth: 1,
     },
