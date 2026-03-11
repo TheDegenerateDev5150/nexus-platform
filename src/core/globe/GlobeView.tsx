@@ -58,13 +58,6 @@ export default function GlobeView() {
     const setCameraPosition = useStore((s) => s.setCameraPosition);
     const setFps = useStore((s) => s.setFps);
 
-    // Camera position from store
-    const cameraLat = useStore((s) => s.cameraLat);
-    const cameraLon = useStore((s) => s.cameraLon);
-    const cameraAlt = useStore((s) => s.cameraAlt);
-    const cameraHeading = useStore((s) => s.cameraHeading);
-    const cameraPitch = useStore((s) => s.cameraPitch);
-
     // Compute visible & filtered entities
     const visibleEntities = useMemo(() => {
         const result: Array<{ entity: GeoEntity; options: CesiumEntityOptions }> = [];
@@ -250,6 +243,20 @@ export default function GlobeView() {
         viewer.resolutionScale = resolutionScale;
         viewer.scene.msaaSamples = msaaSamples;
         viewer.scene.postProcessStages.fxaa.enabled = enableFxaa;
+
+        // Camera controller — smooth zoom, no artificial limits
+        const ctrl = viewer.scene.screenSpaceCameraController;
+        ctrl.minimumZoomDistance = 200;
+        ctrl.maximumZoomDistance = 25_000_000;
+        ctrl.zoomEventTypes = [
+            (window as any).Cesium?.CameraEventType?.WHEEL,
+            (window as any).Cesium?.CameraEventType?.PINCH,
+        ].filter(Boolean);
+        ctrl.tiltEventTypes = [
+            (window as any).Cesium?.CameraEventType?.RIGHT_DRAG,
+            (window as any).Cesium?.CameraEventType?.PINCH,
+        ].filter(Boolean);
+        ctrl.enableCollisionDetection = true;
 
         // Initialize Google Photorealistic 3D Tiles once
         try {
