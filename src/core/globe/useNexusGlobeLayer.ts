@@ -1,3 +1,17 @@
+/**
+ * NEXUS Globe Layer
+ * ─────────────────────────────────────────────────────────────
+ * Renders NEXUS intelligence events directly onto the CesiumJS globe:
+ * - Pulsing concentric rings for active alerts (level-colored)
+ * - GPS jamming zone ellipses (orange translucent)
+ * - Satellite ground-track polylines
+ * - ADS-B void zones (dark red)
+ * - Signal epicentre labels
+ *
+ * Uses Cesium Entity API for declarative management.
+ * All entities are prefixed `__nexus_` for easy cleanup.
+ */
+
 import { useEffect, useRef } from "react";
 import {
   Color,

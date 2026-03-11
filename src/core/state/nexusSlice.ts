@@ -1,3 +1,7 @@
+/**
+ * NEXUS Zustand Slice v3 — Unified intelligence platform state
+ * Single source of truth for all NEXUS data: alerts, signals, sources, markets, swarm, reports
+ */
 import type { StateCreator } from "zustand";
 import type { AppStore } from "./store";
 import type { NexusEvent, SourceHealth, AgentTask } from "@/nexus/types";
