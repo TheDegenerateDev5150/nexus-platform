@@ -364,7 +364,7 @@ function LiveTelegramFeed({ alert }: { alert: NexusAlert }) {
             if (isRelevant) {
               const ch = ALL_CHANNELS.find(c => c.handle === msg.channelHandle);
               setMessages(prev => [{
-                id: msg.id || Math.random().toString(36),
+                id: msg.id || `msg_${msg.channelHandle}_${msg.timestamp || Date.now()}`,
                 channelHandle: msg.channelHandle,
                 channelName: msg.channelName || msg.channelHandle,
                 text: msg.text,
