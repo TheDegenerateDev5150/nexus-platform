@@ -78,10 +78,14 @@ export async function GET(req: Request) {
 
   const events: GDELTEvent[] = [];
 
-  // Parallel fetch of 3 random queries
-  const selectedQueries = GDELT_CONFLICT_QUERIES
-    .sort(() => Math.random() - 0.5)
-    .slice(0, 3);
+  // Select 3 queries in a time-rotating fashion (new set every 5 minutes)
+  const windowIdx = Math.floor(Date.now() / 300_000);
+  const offset    = (windowIdx * 3) % GDELT_CONFLICT_QUERIES.length;
+  const selectedQueries = [
+    GDELT_CONFLICT_QUERIES[offset % GDELT_CONFLICT_QUERIES.length],
+    GDELT_CONFLICT_QUERIES[(offset + 1) % GDELT_CONFLICT_QUERIES.length],
+    GDELT_CONFLICT_QUERIES[(offset + 2) % GDELT_CONFLICT_QUERIES.length],
+  ];
 
   await Promise.all(selectedQueries.map(async (query) => {
     try {
@@ -108,7 +112,7 @@ export async function GET(req: Request) {
         }
 
         events.push({
-          id: `gdelt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          id: `gdelt_${a.seendate || Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
           query,
           article: a,
           goldsteinScore: goldstein,
