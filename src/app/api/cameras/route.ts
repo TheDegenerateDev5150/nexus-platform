@@ -21,22 +21,26 @@ async function fetchEarthCamPublic() {
     );
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.cameras || []).map((c: Record<string, unknown>) => ({
-      id:     `earthcam-${c.id}`,
-      type:   "webcam",
-      name:   c.title,
-      lat:    c.gps?.lat ?? 0,
-      lng:    c.gps?.lng ?? 0,
-      city:   c.location?.city ?? "",
-      country:c.location?.country ?? "",
-      isLive: true,
-      streamUrl: c.embed_url,
-      source: "earthcam.com",
-      cvDetections:   [],  // populated by Python CV worker only
-      cvConfidence:   0,
-      isAlertProximity: false,
-      lastUpdate: new Date().toISOString(),
-    }));
+    return (data.cameras || []).map((c: Record<string, unknown>) => {
+      const gps = c.gps as Record<string, number> | undefined;
+      const location = c.location as Record<string, string> | undefined;
+      return {
+        id:     `earthcam-${c.id}`,
+        type:   "webcam",
+        name:   c.title,
+        lat:    gps?.lat ?? 0,
+        lng:    gps?.lng ?? 0,
+        city:   location?.city ?? "",
+        country:location?.country ?? "",
+        isLive: true,
+        streamUrl: c.embed_url,
+        source: "earthcam.com",
+        cvDetections:   [],
+        cvConfidence:   0,
+        isAlertProximity: false,
+        lastUpdate: new Date().toISOString(),
+      };
+    });
   } catch {
     return [];
   }
@@ -63,7 +67,7 @@ async function fetchWindyCams(apiKey: string, lat: number, lng: number, radius =
       city:   (c.location as Record<string, string>)?.city ?? "",
       country:(c.location as Record<string, string>)?.country ?? "",
       isLive: (c.status as string) === "active",
-      streamUrl: (c.images as Record<string, string>)?.current?.preview ?? null,
+      streamUrl: ((c.images as Record<string, Record<string, string>>)?.current)?.preview ?? null,
       source: "windy.com",
       cvDetections:   [],
       cvConfidence:   0,

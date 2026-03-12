@@ -285,7 +285,7 @@ async def on_message(event):
     channel_handle = getattr(channel_entity, "username", "unknown") or "unknown"
     
     if not msg.text or len(msg.text) < 10:
-        return  # Ignorer messages trop courts
+        return
     
     text = msg.text
     lang = detect_language(text)
@@ -294,7 +294,7 @@ async def on_message(event):
     level = detect_alert_level(text + " " + translated)
     tags = extract_tags(text + " " + translated)
     
-    # Détection repost (Jaccard)
+    # Repost detection (Jaccard)
     is_repost = False
     for prev_text in list(recent_messages):
         if jaccard_similarity(text, prev_text) > 0.82:
@@ -302,7 +302,7 @@ async def on_message(event):
             break
     recent_messages.append(text)
     
-    # Forward source
+    # Forward tracking
     is_forward = msg.forward is not None
     forward_from = None
     if is_forward and msg.forward.channel_id:
@@ -312,12 +312,69 @@ async def on_message(event):
         except Exception:
             pass
     
-    # Confiance
+    # Forward burst detection — count unique channels forwarding same event in 3min.
+    # A burst >= 5 channels is a strong propagation signal (often precedes media coverage).
+    evt_hash = event_hash(translated, zone)
+    forward_burst = 0
+    if is_forward:
+        burst_key = f"fwd_{evt_hash}"
+        if burst_key not in event_clusters:
+            event_clusters[burst_key] = []
+        event_clusters[burst_key].append({
+            "channel": channel_handle,
+            "ts_epoch": msg.date.timestamp(),
+        })
+        now_epoch = msg.date.timestamp()
+        recent_fwds = [
+            e for e in event_clusters[burst_key]
+            if abs(now_epoch - e["ts_epoch"]) < 180
+        ]
+        forward_burst = len(set(e["channel"] for e in recent_fwds))
+    
+    if forward_burst >= 5 and "propagation_burst" not in tags:
+        tags.append("propagation_burst")
+        level = max(level, 6)
+        log.info(f"PROPAGATION BURST: {forward_burst} channels / 3min  hash={evt_hash[:8]}")
+    
     confidence = compute_confidence(channel_handle, text, is_repost, is_forward)
     
-    # Hash événement
-    evt_hash = event_hash(translated, zone)
     event_clusters[evt_hash].append({
+        "channel": channel_handle,
+        "msg_id": msg.id,
+        "timestamp": msg.date.isoformat(),
+        "text": text[:200],
+    })
+    
+    cluster = event_clusters[evt_hash]
+    cluster.sort(key=lambda x: x["msg_id"])
+    primacy_rank = next((i+1 for i, m in enumerate(cluster) if m["channel"] == channel_handle), 1)
+    
+    nexus_msg = NexusMessage(
+        id=f"tg-{channel_handle}-{msg.id}",
+        channel=channel_handle,
+        msg_id=msg.id,
+        text=text[:400],
+        translated_text=translated[:400],
+        original_language=lang,
+        timestamp=msg.date.isoformat(),
+        credibility_score=CHANNELS.get(channel_handle, {}).get("cred", 50),
+        confidence_score=confidence,
+        channel_tier=CHANNELS.get(channel_handle, {}).get("tier", 3),
+        channel_bias=CHANNELS.get(channel_handle, {}).get("bias", "UNKNOWN"),
+        is_forward=is_forward,
+        forward_from=forward_from,
+        has_media=msg.media is not None,
+        media_type=type(msg.media).__name__ if msg.media else None,
+        entities_detected=[{"type": "location", "text": zone}] if zone else [],
+        zone=zone,
+        level=level,
+        tags=tags,
+        is_repost=is_repost,
+        primacy_rank=primacy_rank,
+        event_hash=evt_hash if len(cluster) > 1 else None,
+    )
+    
+    cred_bar = "#" * int(confidence * 10) + "." * (10 - int(confidence * 10))
         "channel": channel_handle,
         "msg_id": msg.id,
         "timestamp": msg.date.isoformat(),
@@ -355,21 +412,18 @@ async def on_message(event):
         event_hash=evt_hash if len(cluster) > 1 else None,
     )
     
-    # Loguer
-    icon = LANGUAGE_ICONS.get(lang, "🌐")
-    cred_bar = "█" * (int(confidence * 10)) + "░" * (10 - int(confidence * 10))
+    # Log (no emojis — clean output for log aggregators like Datadog/Render)
     log.info(
-        f"{icon} [{channel_handle}] LV{level} | conf:[{cred_bar}]{confidence:.0%} "
-        f"| {'PREMIER' if primacy_rank == 1 else f'rang {primacy_rank}'} "
+        f"[{channel_handle}] LV{level} | [{cred_bar}]{confidence:.0%} "
+        f"| {'FIRST' if primacy_rank == 1 else f'rank {primacy_rank}'} "
         f"| {'REPOST' if is_repost else 'ORIGINAL'} "
         f"| {zone or 'GLOBAL'} | {tags[:3]}"
     )
     
-    # Envoyer à NEXUS API
     await push_to_nexus(nexus_msg)
 
 async def push_to_nexus(msg: NexusMessage):
-    """Pousse le message vers l'API NEXUS Next.js"""
+    """Push message to NEXUS Next.js API."""
     try:
         async with httpx.AsyncClient(timeout=5) as client_http:
             r = await client_http.post(
@@ -383,25 +437,24 @@ async def push_to_nexus(msg: NexusMessage):
         log.error(f"Push failed: {e}")
 
 async def main():
-    log.info("🚀 NEXUS Telegram Collector démarré")
-    log.info(f"📡 Surveillance de {len(CHANNELS)} canaux")
-    log.info(f"🔑 API ID: {API_ID}")
-    log.info(f"🌐 NEXUS API: {NEXUS_API_URL}")
+    log.info("NEXUS Telegram Collector starting")
+    log.info(f"Monitoring {len(CHANNELS)} channels")
+    log.info(f"API ID: {API_ID}")
+    log.info(f"NEXUS API: {NEXUS_API_URL}")
     
     await client.start()
-    log.info("✅ Connecté à Telegram")
+    log.info("Connected to Telegram")
     
-    # Résolution des entités (canaux)
     resolved = 0
     for handle in CHANNELS.keys():
         try:
             await client.get_entity(handle)
             resolved += 1
         except Exception as e:
-            log.warning(f"⚠️ Canal non résolu: {handle} — {e}")
+            log.warning(f"Channel not resolved: {handle} — {e}")
     
-    log.info(f"📊 {resolved}/{len(CHANNELS)} canaux résolus")
-    log.info("👁️ Écoute en cours...")
+    log.info(f"{resolved}/{len(CHANNELS)} channels resolved")
+    log.info("Listening for new messages...")
     
     await client.run_until_disconnected()
 

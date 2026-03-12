@@ -64,7 +64,7 @@ async function fetchAlphaVantage(symbol: string, apiKey: string) {
     const value   = parseFloat(quote["05. price"]);
     const change  = parseFloat(quote["09. change"]);
     const changePct = parseFloat(quote["10. change percent"].replace("%", ""));
-    return { value, change, changePercent: changePct, history: null };
+    return { value, change, changePercent: changePct, history: null as number[] | null };
   } catch {
     return null;
   }

@@ -1,435 +1,415 @@
 #!/usr/bin/env python3
 """
-NEXUS Alert Bot — Public Telegram Channel Publisher
-════════════════════════════════════════════════════
+nexus_alert_bot.py
+NEXUS Intelligence — Telegram Alert Publisher + Interactive Bot
 
-Polls the NEXUS /api/nexus/intelligence SSE stream and pushes
-confirmed alerts (level >= 7) to a public Telegram channel.
+Polls /api/nexus/alerts every 20s and publishes high-level events
+to a Telegram channel. Also handles commands from any chat/user.
 
-The bot IS the live demo. People subscribe to the channel and
-see the system detecting real events in real time.
+Commands:
+    /status         — source health + active alert count
+    /zone <name>    — recent alerts for a specific zone
+    /level <n>      — set minimum publish level (admin only)
+    /sources        — active data sources list
+    /help           — command reference
 
-SETUP:
-  1. Create a bot via @BotFather → get BOT_TOKEN
-  2. Create a public channel (e.g. @nexus_osint_alerts)
-  3. Add the bot as admin to the channel
-  4. pip install python-telegram-bot httpx
-  5. Set environment variables (see below)
-  6. python3 nexus_alert_bot.py
+Alert behaviour:
+    - Level 7+   → publish to channel immediately
+    - Level 9+   → thread-style: summary + one reply per signal (max 6)
+    - Escalation → edit existing message when level rises, no duplicate
 
-ENV VARS:
-  NEXUS_BOT_TOKEN     — from @BotFather
-  NEXUS_CHANNEL_ID    — @nexus_osint_alerts or -100xxxxxxxxx
-  NEXUS_API_URL       — e.g. https://nexus-platform-xxxx.onrender.com
-  BOT_MIN_LEVEL       — minimum alert level to publish (default: 7)
-  BOT_COOLDOWN_SEC    — minimum seconds between two messages (default: 30)
-
-RATE LIMITS:
-  Telegram limits bots to 20 messages/min per channel.
-  Flood control is handled automatically (exponential backoff).
-
-SOURCE CREDIBILITY:
-  When an alert is driven by Telegram channels the bot knows,
-  it lists the source channels with their credibility scores —
-  linking directly back to the original posts.
+ENV:
+    NEXUS_BOT_TOKEN     — BotFather token (required)
+    NEXUS_CHANNEL_ID    — e.g. @nexus_osint_alerts or -100xxxxxxxxxx (required)
+    NEXUS_API_URL       — Next.js base URL (required)
+    BOT_MIN_LEVEL       — minimum alert level to publish (default 7)
+    BOT_COOLDOWN_SEC    — per-zone publish cooldown in seconds (default 30)
+    BOT_ADMIN_IDS       — comma-separated Telegram user IDs for /level command
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 import os
 import time
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
 from typing import Optional
 
 import httpx
-from telegram import Bot
-from telegram.constants import ParseMode
-from telegram.error import RetryAfter, TimedOut, NetworkError
 
-# ── Configuration ──────────────────────────────────────────────
+try:
+    from telegram import Bot, Update
+    from telegram.constants import ParseMode
+    from telegram.error import RetryAfter, TelegramError
+    from telegram.ext import Application, CommandHandler, ContextTypes
+    TELEGRAM_OK = True
+except ImportError:
+    TELEGRAM_OK = False
 
-BOT_TOKEN    = os.environ["NEXUS_BOT_TOKEN"]
-CHANNEL_ID   = os.environ["NEXUS_CHANNEL_ID"]           # e.g. @nexus_osint_alerts
-API_URL      = os.environ.get("NEXUS_API_URL", "http://localhost:3000")
+# ─── Config ───────────────────────────────────────────────────
+
+BOT_TOKEN    = os.environ.get("NEXUS_BOT_TOKEN", "")
+CHANNEL_ID   = os.environ.get("NEXUS_CHANNEL_ID", "")
+API_URL      = os.environ.get("NEXUS_API_URL", "http://localhost:3000").rstrip("/")
 MIN_LEVEL    = int(os.environ.get("BOT_MIN_LEVEL", "7"))
 COOLDOWN_SEC = int(os.environ.get("BOT_COOLDOWN_SEC", "30"))
-POLL_SEC     = int(os.environ.get("BOT_POLL_SEC", "20"))
+ADMIN_IDS    = {
+    int(x.strip())
+    for x in os.environ.get("BOT_ADMIN_IDS", "").split(",")
+    if x.strip().isdigit()
+}
+
+POLL_INTERVAL = 20
+API_TIMEOUT   = 10
+
+# ─── Logging ──────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [NEXUS-BOT] %(levelname)s %(message)s",
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
     datefmt="%H:%M:%S",
 )
-log = logging.getLogger("nexus.bot")
+log = logging.getLogger("nexus_bot")
 
-# ── Telegram channel credibility scores ───────────────────────
-# These are the 35 channels monitored by nexus_telegram_collector.py.
-# When an alert is correlated to one of these, we include the
-# channel handle + score in the alert message.
-
-CHANNEL_SCORES: dict[str, dict] = {
-    "swatter_jammer":            {"cred": 88, "bias": "ANALYST",   "url": "t.me/swatter_jammer"},
-    "UltraRadar":                {"cred": 87, "bias": "NEUTRAL",   "url": "t.me/UltraRadar"},
-    "rnintel":                   {"cred": 86, "bias": "ANALYST",   "url": "t.me/rnintel"},
-    "Farsi_Iranwire":            {"cred": 85, "bias": "NEUTRAL",   "url": "t.me/Farsi_Iranwire"},
-    "warfareanalysis":           {"cred": 85, "bias": "ANALYST",   "url": "t.me/warfareanalysis"},
-    "DDGeopolitics":             {"cred": 84, "bias": "ANALYST",   "url": "t.me/DDGeopolitics"},
-    "social_drone":              {"cred": 84, "bias": "NEUTRAL",   "url": "t.me/social_drone"},
-    "wfwitness":                 {"cred": 81, "bias": "NEUTRAL",   "url": "t.me/wfwitness"},
-    "IranintlTV":                {"cred": 80, "bias": "PRO_WEST",  "url": "t.me/IranintlTV"},
-    "IntelRepublic":             {"cred": 78, "bias": "NEUTRAL",   "url": "t.me/IntelRepublic"},
-    "AssyriaNewsNetwork":        {"cred": 77, "bias": "NEUTRAL",   "url": "t.me/AssyriaNewsNetwork"},
-    "idfofficial":               {"cred": 72, "bias": "OFFICIAL",  "url": "t.me/idfofficial"},
-    "GeoPWatch":                 {"cred": 79, "bias": "ANALYST",   "url": "t.me/GeoPWatch"},
-    "BellumActaNews":            {"cred": 80, "bias": "NEUTRAL",   "url": "t.me/BellumActaNews"},
-    "warmonitors":               {"cred": 82, "bias": "NEUTRAL",   "url": "t.me/warmonitors"},
-    "Tsaplienko":                {"cred": 82, "bias": "PRO_UA",    "url": "t.me/Tsaplienko"},
-    "warriorsukrainian":         {"cred": 73, "bias": "PRO_UA",    "url": "t.me/warriorsukrainian"},
-    "ukrainejournal":            {"cred": 75, "bias": "PRO_UA",    "url": "t.me/ukrainejournal"},
-    "United24media":             {"cred": 72, "bias": "PRO_UA",    "url": "t.me/United24media"},
-    "LebUpdate":                 {"cred": 76, "bias": "NEUTRAL",   "url": "t.me/LebUpdate"},
-    "Middle_East_Spectator":     {"cred": 76, "bias": "NEUTRAL",   "url": "t.me/Middle_East_Spectator"},
-    "medmannews":                {"cred": 73, "bias": "NEUTRAL",   "url": "t.me/medmannews"},
-    "Israel_Middle_East_Insight":{"cred": 70, "bias": "PRO_IL",    "url": "t.me/Israel_Middle_East_Insight"},
-    "IsraelWarLive":             {"cred": 68, "bias": "PRO_IL",    "url": "t.me/IsraelWarLive"},
-    "engliishabuali":            {"cred": 68, "bias": "PRO_PA",    "url": "t.me/engliishabuali"},
-    "beholdisraelchannel":       {"cred": 66, "bias": "PRO_IL",    "url": "t.me/beholdisraelchannel"},
-    "hnaftali":                  {"cred": 74, "bias": "OFFICIAL",  "url": "t.me/hnaftali"},
-    "intelslava":                {"cred": 63, "bias": "PRO_RU",    "url": "t.me/intelslava"},
-    "thecradlemedia":            {"cred": 62, "bias": "PRO_IR",    "url": "t.me/thecradlemedia"},
-    "TheSimurgh313":             {"cred": 60, "bias": "PRO_IR",    "url": "t.me/TheSimurgh313"},
-    "stayfreeworld":             {"cred": 52, "bias": "AGGREGATOR","url": "t.me/stayfreeworld"},
-    "NewsWorld_23":              {"cred": 58, "bias": "AGGREGATOR","url": "t.me/NewsWorld_23"},
-    "RezistanceTrench1":         {"cred": 48, "bias": "PRO_IR",    "url": "t.me/RezistanceTrench1"},
-    "warvideos18":               {"cred": 42, "bias": "AGGREGATOR","url": "t.me/warvideos18"},
-    "horror_footage":            {"cred": 45, "bias": "AGGREGATOR","url": "t.me/horror_footage"},
-}
-
-# Source code → readable label
-SOURCE_LABELS: dict[str, str] = {
-    "aviation":          "ADS-B",
-    "maritime":          "AIS",
-    "satellite":         "SAT-TLE",
-    "gpsjam":            "GPS-JAM",
-    "notam":             "NOTAM",
-    "social_x":          "X/Twitter",
-    "social_telegram":   "Telegram",
-    "social_tiktok":     "TikTok",
-    "social_vk":         "VK",
-    "social_weibo":      "Weibo",
-    "social_reddit":     "Reddit",
-    "economic_oil":      "Brent",
-    "economic_gold":     "XAU",
-    "economic_bdi":      "BDI",
-    "economic_defense":  "LMT/RTX",
-    "gdelt":             "GDELT",
-    "usgs":              "USGS",
-    "nasa_firms":        "NASA-FIRMS",
-    "absence_ads_b":     "ADS-B-VOID",
-    "absence_ais":       "AIS-DARK",
-    "nightlights":       "NASA-NLGT",
-    "acled":             "ACLED",
-    "wikipedia_edits":   "WIKI-VEL",
-    "netblocks":         "NETBLOCKS",
-    "cloudflare_radar":  "CF-RADAR",
-    "sentinel_hub":      "SENTINEL",
-    "dark_web":          "DARKWEB",
-    "private_jets":      "PRIV-JET",
-}
-
-# Level labels
-LEVEL_LABELS = {
-    10: "EXTINCTION", 9: "CRITICAL", 8: "SEVERE",
-    7: "HIGH",        6: "MODERATE", 5: "WATCH",
-    4: "LOW",         3: "INFO",
-}
-
-# Level indicator (text-only, no emoji)
-LEVEL_INDICATOR = {
-    10: "!!!", 9: "!!", 8: "!!", 7: "!", 6: ".", 5: ".",
-}
-
-# ── State ──────────────────────────────────────────────────────
+# ─── In-process state ─────────────────────────────────────────
 
 @dataclass
-class PublishedAlert:
-    alert_id: str
-    level: int
-    published_at: float   # epoch
+class State:
+    min_level:      int  = MIN_LEVEL
+    published_ids:  set  = field(default_factory=set)
+    zone_cooldowns: dict = field(default_factory=dict)  # zone → last_epoch
+    message_ids:    dict = field(default_factory=dict)  # alert_id → tg_msg_id
+    alert_levels:   dict = field(default_factory=dict)  # alert_id → last known level
 
-published_cache: dict[str, PublishedAlert] = {}  # alert_id → published
-last_message_time: float = 0.0
+ST = State()
 
-# ── Alert formatting ───────────────────────────────────────────
+# ─── Alert model ──────────────────────────────────────────────
 
-def format_alert_message(alert: dict) -> str:
-    """
-    Format a NEXUS alert as a clean Telegram message.
-    No emojis. Dense, scannable, actionable.
-    
-    Example output:
-    
-    [CRITICAL / LVL 9] Tel Aviv — MILITARY
-    ─────────────────────────────────────
-    Confidence: 94% · Sources: 8 independent
-    
-    Signals:
-      ADS-B    US military aircraft — Med. East approach
-      X/TW     +847% explosion mentions / 14,200 shares
-      TG       IDF channels active — 340 msg/h
-      AIS      Haifa vessels rerouted ×12
-      GPS-JAM  EW jamming 180km radius confirmed
-      SAT-TLE  KH-11 + Gaofen-3 stacking zone
-    
-    Correlation: spatial=0.92 temporal=0.88 semantic=0.95
-    History: 7 Oct 2023 — similarity 78%
-    
-    Driving channels (cross-referenced):
-      @rnintel         [cred:86 ANALYST]  t.me/rnintel
-      @warmonitors     [cred:82 NEUTRAL]  t.me/warmonitors
-    
-    NEXUS · github.com/Vitalcheffe/nexus-platform
-    """
-    level       = alert.get("level", 0)
-    zone        = alert.get("zone", "Unknown")
-    alert_type  = alert.get("type", "")
-    confidence  = alert.get("confidence", 0)
-    signals     = alert.get("signals", [])
-    corr        = alert.get("correlation", {})
-    hist_matches= alert.get("historicalMatches", [])
-    ai_summary  = alert.get("aiSummary", "")
-    tg_channels = alert.get("telegramChannels", [])  # injected by engine when TG signals present
-    ts          = alert.get("timestamp", "")
+@dataclass
+class Alert:
+    id:        str
+    level:     int
+    zone:      str
+    country:   str
+    category:  str
+    signals:   list
+    correlation: dict
+    historical: list
+    summary:   str
+    timestamp: str
 
-    level_label = LEVEL_LABELS.get(level, f"LVL{level}")
-    indicator   = LEVEL_INDICATOR.get(level, "")
+# ─── API helpers ──────────────────────────────────────────────
 
-    # Header
-    lines = [
-        f"{indicator} [{level_label} / LVL {level}] {zone}",
-        f"Type: {alert_type}  |  Conf: {confidence}%  |  Sources: {len(signals)}",
-        "─" * 38,
+async def fetch_alerts(min_level: int = 7, limit: int = 15) -> list[Alert]:
+    url = f"{API_URL}/api/nexus/alerts?minLevel={min_level}&limit={limit}"
+    try:
+        async with httpx.AsyncClient(timeout=API_TIMEOUT) as c:
+            r = await c.get(url)
+            r.raise_for_status()
+            data = r.json()
+            out = []
+            for a in data.get("alerts", []):
+                try:
+                    out.append(Alert(
+                        id=a.get("id", ""),
+                        level=int(a.get("level", 0)),
+                        zone=a.get("zone", "UNKNOWN"),
+                        country=a.get("country", "XX"),
+                        category=a.get("category", ""),
+                        signals=a.get("signals", []),
+                        correlation=a.get("correlation", {}),
+                        historical=a.get("historicalMatches", []),
+                        summary=a.get("aiSummary", ""),
+                        timestamp=a.get("timestamp", ""),
+                    ))
+                except Exception:
+                    continue
+            return out
+    except Exception as e:
+        log.warning(f"fetch_alerts: {e}")
+        return []
+
+async def fetch_health() -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=API_TIMEOUT) as c:
+            r = await c.get(f"{API_URL}/api/health")
+            return r.json()
+    except Exception:
+        return {}
+
+# ─── Text formatting ──────────────────────────────────────────
+
+def level_label(level: int) -> str:
+    if level >= 9: return "CRITICAL"
+    if level >= 7: return "HIGH"
+    if level >= 5: return "ELEVATED"
+    return "WATCH"
+
+def corr_line(c: dict) -> str:
+    dims = [
+        ("SPA", c.get("spatial", 0)),
+        ("TMP", c.get("temporal", 0)),
+        ("SEM", c.get("semantic", 0)),
+        ("BHV", c.get("behavioral", 0)),
+        ("HIS", c.get("historical", 0)),
+        ("SRC", c.get("sourceDiv", 0)),
+    ]
+    return "  ".join(f"{k}:{int(v * 100):02d}" for k, v in dims)
+
+def format_alert(a: Alert, escalated_from: int = 0) -> str:
+    ts     = (a.timestamp[:16].replace("T", " ") + " UTC") if a.timestamp else "—"
+    label  = level_label(a.level)
+    parts  = [
+        f"<b>[{label}]  LV{a.level}  {a.zone.upper()}</b>",
+        f"<code>{ts}  ·  {a.category}  ·  {a.country}</code>",
+        "",
     ]
 
-    # Signals block
-    if signals:
-        lines.append("Signals:")
-        for sig in signals:
-            src_label = SOURCE_LABELS.get(sig.get("source", ""), sig.get("source", "UNK"))
-            text = sig.get("text", "")
-            # Truncate long text
-            if len(text) > 72:
-                text = text[:69] + "..."
-            lines.append(f"  {src_label:<10} {text}")
+    if a.signals:
+        parts.append("<b>SOURCES</b>")
+        for sig in a.signals[:8]:
+            src  = str(sig.get("source", "?")).upper()[:12]
+            conf = int(sig.get("confidence", 0) * 100)
+            text = str(sig.get("text", ""))[:80]
+            parts.append(f"<code>[{src}] {conf:02d}%</code>  {text}")
+        parts.append("")
 
-    # Correlation scores
-    if corr:
-        corr_str = "  ".join([
-            f"spat={corr.get('spatial',0):.2f}",
-            f"temp={corr.get('temporal',0):.2f}",
-            f"sem={corr.get('semantic',0):.2f}",
-        ])
-        lines.append(f"\nCorrelation: {corr_str}")
+    c = a.correlation
+    if c:
+        total = int(c.get("total", 0) * 100)
+        parts.append(f"<b>CORRELATION  {total}%</b>")
+        parts.append(f"<code>{corr_line(c)}</code>")
+        parts.append("")
 
-    # Historical match
-    if hist_matches:
-        best = hist_matches[0]
-        lines.append(f"History: {best.get('name','')} — similarity {int(best.get('similarity',0)*100)}%")
+    if a.historical:
+        best = a.historical[0]
+        sim  = int(best.get("similarity", 0) * 100)
+        name = best.get("name", "?")
+        date = best.get("date", "?")
+        parts.append(f"<b>MATCH</b>  {name} ({date})  {sim}%")
+        parts.append("")
 
-    # AI summary (truncated)
-    if ai_summary:
-        summary_short = ai_summary[:220] + ("..." if len(ai_summary) > 220 else "")
-        lines.append(f"\nAnalysis:\n{summary_short}")
+    if a.summary:
+        parts.append(f"<i>{a.summary.strip()[:280]}</i>")
 
-    # Driving Telegram channels (with credibility scores)
-    driving_channels = []
-    for sig in signals:
-        if sig.get("source") == "social_telegram":
-            # Extract channel mentions from signal text (e.g. "@rnintel")
-            import re
-            mentions = re.findall(r"@(\w+)", sig.get("text", ""))
-            for mention in mentions:
-                if mention.lower() in CHANNEL_SCORES:
-                    driving_channels.append(mention.lower())
+    if escalated_from:
+        parts.append(f"\n<b>ESCALATED  LV{escalated_from} → LV{a.level}</b>")
 
-    # Also include explicitly passed channels
-    for ch in tg_channels:
-        if ch.lower() in CHANNEL_SCORES and ch.lower() not in driving_channels:
-            driving_channels.append(ch.lower())
+    parts.append(f"\n<code>NEXUS · {len(a.signals)} src · ID {a.id[:8]}</code>")
+    return "\n".join(parts)
 
-    if driving_channels:
-        lines.append("\nSource channels:")
-        for ch in driving_channels[:5]:  # max 5
-            info = CHANNEL_SCORES[ch]
-            lines.append(f"  @{ch:<24} [cred:{info['cred']} {info['bias']}]")
+def format_signal(sig: dict) -> str:
+    src  = str(sig.get("source", "?")).upper()
+    conf = int(sig.get("confidence", 0) * 100)
+    text = str(sig.get("text", ""))[:200]
+    ts   = str(sig.get("timestamp", ""))[:16].replace("T", " ")
+    return f"<code>[{src}]  {conf}%  {ts}</code>\n{text}"
 
-    # Footer
-    lines.append(f"\nnexus-platform · t={ts[:19] if ts else 'now'}")
-    lines.append("github.com/Vitalcheffe/nexus-platform")
+# ─── Telegram send helpers ────────────────────────────────────
 
-    return "\n".join(lines)
+async def send_msg(bot: Bot, text: str, reply_id: Optional[int] = None) -> Optional[int]:
+    for attempt in range(4):
+        try:
+            kwargs = dict(
+                chat_id=CHANNEL_ID,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            if reply_id:
+                kwargs["reply_to_message_id"] = reply_id
+            msg = await bot.send_message(**kwargs)
+            return msg.message_id
+        except RetryAfter as e:
+            wait = e.retry_after + 1
+            log.warning(f"Rate limited — sleeping {wait}s")
+            await asyncio.sleep(wait)
+        except TelegramError as e:
+            log.error(f"send_msg error: {e}")
+            return None
+    return None
 
-
-# ── NEXUS API polling ──────────────────────────────────────────
-
-async def fetch_active_alerts(client: httpx.AsyncClient) -> list[dict]:
-    """
-    Polls the NEXUS REST endpoint for current alerts.
-    Falls back from SSE to JSON polling (SSE harder to parse in polling loop).
-    """
+async def edit_msg(bot: Bot, message_id: int, text: str) -> bool:
     try:
-        resp = await client.get(
-            f"{API_URL}/api/nexus/alerts",
-            timeout=10.0,
-            headers={"Accept": "application/json"},
+        await bot.edit_message_text(
+            chat_id=CHANNEL_ID,
+            message_id=message_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("alerts", [])
-    except (httpx.TimeoutException, httpx.ConnectError) as e:
-        log.warning(f"API fetch failed: {e}")
-    return []
-
-
-def should_publish(alert: dict) -> bool:
-    """
-    Decide whether to publish an alert.
-    Rules:
-    - Level >= MIN_LEVEL
-    - Not already published (unless level escalated)
-    - Not acknowledged (if info available)
-    - At least 3 independent signals (avoid noise)
-    """
-    alert_id = alert.get("id", "")
-    level    = alert.get("level", 0)
-    signals  = alert.get("signals", [])
-    acked    = alert.get("acknowledged", False)
-
-    if level < MIN_LEVEL:
-        return False
-    if acked:
-        return False
-    if len(signals) < 3:
+        return True
+    except TelegramError as e:
+        log.warning(f"edit_msg failed: {e}")
         return False
 
-    # Already published at same or higher level
-    if alert_id in published_cache:
-        prev_level = published_cache[alert_id].level
-        if level <= prev_level:
-            return False
-        # Level escalated — republish with escalation marker
-        log.info(f"Alert {alert_id} escalated: {prev_level} → {level}")
+# ─── Publish logic ────────────────────────────────────────────
 
-    return True
+async def maybe_publish(bot: Bot, alert: Alert) -> None:
+    zone = alert.zone.lower()
+    now  = time.time()
 
+    existing_msg = ST.message_ids.get(alert.id)
+    prev_level   = ST.alert_levels.get(alert.id, 0)
 
-# ── Main loop ──────────────────────────────────────────────────
-
-async def run():
-    bot = Bot(token=BOT_TOKEN)
-
-    # Verify bot and channel on startup
-    try:
-        me = await bot.get_me()
-        log.info(f"Bot authenticated: @{me.username}")
-    except Exception as e:
-        log.error(f"Bot authentication failed: {e}")
+    # Escalation: edit the existing message
+    if existing_msg and alert.level > prev_level:
+        text = format_alert(alert, escalated_from=prev_level)
+        await edit_msg(bot, existing_msg, text)
+        ST.alert_levels[alert.id] = alert.level
+        log.info(f"Escalated {alert.zone}: LV{prev_level} → LV{alert.level}")
         return
 
-    log.info(f"Polling {API_URL} every {POLL_SEC}s — publishing level {MIN_LEVEL}+ to {CHANNEL_ID}")
+    # Already published, no change
+    if alert.id in ST.published_ids:
+        return
 
-    async with httpx.AsyncClient() as http:
-        while True:
-            try:
-                alerts = await fetch_active_alerts(http)
+    # Zone cooldown
+    if (now - ST.zone_cooldowns.get(zone, 0)) < COOLDOWN_SEC:
+        return
 
-                for alert in alerts:
-                    if not should_publish(alert):
-                        continue
+    # Send
+    text   = format_alert(alert)
+    msg_id = await send_msg(bot, text)
+    if not msg_id:
+        return
 
-                    alert_id = alert.get("id", "")
-                    level    = alert.get("level", 0)
+    ST.published_ids.add(alert.id)
+    ST.zone_cooldowns[zone] = now
+    ST.message_ids[alert.id] = msg_id
+    ST.alert_levels[alert.id] = alert.level
+    log.info(f"Published LV{alert.level} {alert.zone} ({len(alert.signals)} signals)")
 
-                    # Rate limit
-                    now = time.time()
-                    if now - last_message_time < COOLDOWN_SEC:
-                        wait = COOLDOWN_SEC - (now - last_message_time)
-                        log.debug(f"Rate limit — waiting {wait:.1f}s")
-                        await asyncio.sleep(wait)
+    # Level 9+: post thread replies per signal
+    if alert.level >= 9:
+        await asyncio.sleep(1.2)
+        for sig in alert.signals[:6]:
+            await send_msg(bot, format_signal(sig), reply_id=msg_id)
+            await asyncio.sleep(0.6)
 
-                    message = format_alert_message(alert)
+    # Trim seen set
+    if len(ST.published_ids) > 2000:
+        to_drop = list(ST.published_ids)[:500]
+        for x in to_drop:
+            ST.published_ids.discard(x)
 
-                    # Retry loop for Telegram flood control
-                    for attempt in range(4):
-                        try:
-                            await bot.send_message(
-                                chat_id=CHANNEL_ID,
-                                text=message,
-                                parse_mode=None,   # plain text — no markdown parsing issues
-                                disable_web_page_preview=True,
-                            )
-                            published_cache[alert_id] = PublishedAlert(
-                                alert_id=alert_id,
-                                level=level,
-                                published_at=time.time(),
-                            )
-                            # Access as nonlocal
-                            globals()["last_message_time"] = time.time()
-                            log.info(f"Published alert {alert_id} LVL{level} — {alert.get('zone')}")
-                            break
-                        except RetryAfter as e:
-                            wait = e.retry_after + 1
-                            log.warning(f"Flood control — waiting {wait}s")
-                            await asyncio.sleep(wait)
-                        except (TimedOut, NetworkError) as e:
-                            backoff = 2 ** attempt
-                            log.warning(f"Network error (attempt {attempt+1}): {e} — retry in {backoff}s")
-                            await asyncio.sleep(backoff)
-                        except Exception as e:
-                            log.error(f"Send failed: {e}")
-                            break
+# ─── Poll loop ────────────────────────────────────────────────
 
-            except Exception as e:
-                log.error(f"Main loop error: {e}")
+async def poll_loop(bot: Bot) -> None:
+    log.info(f"Poll loop started  interval={POLL_INTERVAL}s  min_level={ST.min_level}")
+    while True:
+        try:
+            alerts = await fetch_alerts(min_level=ST.min_level, limit=15)
+            for a in sorted(alerts, key=lambda x: x.level, reverse=True):
+                await maybe_publish(bot, a)
+        except Exception as e:
+            log.error(f"poll_loop error: {e}")
+        await asyncio.sleep(POLL_INTERVAL)
 
-            await asyncio.sleep(POLL_SEC)
+# ─── Bot command handlers ─────────────────────────────────────
 
+async def cmd_help(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "<b>NEXUS INTELLIGENCE</b>\n\n"
+        "<code>/status</code>         system status\n"
+        "<code>/zone [name]</code>    alerts for a zone\n"
+        "<code>/level [3-10]</code>   set publish level (admin)\n"
+        "<code>/sources</code>        data source list\n"
+        "<code>/help</code>           this message",
+        parse_mode=ParseMode.HTML,
+    )
 
-# ── Healthcheck endpoint (optional, for UptimeRobot) ──────────
+async def cmd_status(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    health = await fetch_health()
+    lines  = [
+        "<b>NEXUS STATUS</b>",
+        f"<code>Publish level : {ST.min_level}</code>",
+        f"<code>Published     : {len(ST.published_ids)}</code>",
+        f"<code>API           : {API_URL}</code>",
+    ]
+    src_count = health.get("sourcesOnline", "?")
+    if src_count:
+        lines.append(f"<code>Sources up    : {src_count}</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
-async def healthcheck_server():
-    """Minimal HTTP server on port 8080 for UptimeRobot pings."""
-    from aiohttp import web
-    async def health(request: web.Request) -> web.Response:
-        return web.json_response({
-            "status": "ok",
-            "published": len(published_cache),
-            "uptime": int(time.time()),
-        })
-    app = web.Application()
-    app.router.add_get("/health", health)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 8080)
-    await site.start()
-    log.info("Healthcheck server started on :8080/health")
+async def cmd_zone(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if not ctx.args:
+        await update.message.reply_text("Usage: /zone &lt;name&gt;", parse_mode=ParseMode.HTML)
+        return
+    query   = " ".join(ctx.args).lower()
+    alerts  = await fetch_alerts(min_level=1, limit=100)
+    matches = [a for a in alerts if query in a.zone.lower()][:5]
+    if not matches:
+        await update.message.reply_text(f"<code>No alerts found for: {query}</code>", parse_mode=ParseMode.HTML)
+        return
+    parts = [f"<b>ZONE: {query.upper()}</b>  ({len(matches)} alerts)\n"]
+    for a in matches:
+        ts = a.timestamp[:16].replace("T", " ")
+        parts.append(f"LV{a.level}  {a.zone}  <code>{ts}</code>")
+        parts.append(f"  {len(a.signals)} sources  ·  {a.category}")
+        if a.summary:
+            parts.append(f"  <i>{a.summary[:100]}</i>")
+        parts.append("")
+    await update.message.reply_text("\n".join(parts), parse_mode=ParseMode.HTML)
 
+async def cmd_level(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id if update.effective_user else 0
+    if ADMIN_IDS and uid not in ADMIN_IDS:
+        await update.message.reply_text("<code>Not authorized.</code>", parse_mode=ParseMode.HTML)
+        return
+    if not ctx.args or not ctx.args[0].isdigit():
+        await update.message.reply_text("Usage: /level 1-10", parse_mode=ParseMode.HTML)
+        return
+    lvl = int(ctx.args[0])
+    if not 1 <= lvl <= 10:
+        await update.message.reply_text("<code>Level must be 1-10.</code>", parse_mode=ParseMode.HTML)
+        return
+    ST.min_level = lvl
+    await update.message.reply_text(f"<code>Publish level set to {lvl}</code>", parse_mode=ParseMode.HTML)
+    log.info(f"Level changed to {lvl} by user {uid}")
 
-# ── Entrypoint ─────────────────────────────────────────────────
+async def cmd_sources(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    health  = await fetch_health()
+    sources = health.get("sources", [])
+    if not sources:
+        await update.message.reply_text("<code>Source data unavailable.</code>", parse_mode=ParseMode.HTML)
+        return
+    lines = ["<b>ACTIVE SOURCES</b>\n"]
+    for s in sources[:20]:
+        name   = str(s.get("name", "?"))[:16]
+        status = s.get("status", "?")
+        lag    = s.get("lagSec", 0)
+        flag   = "UP" if status == "online" else "DOWN"
+        lines.append(f"<code>[{flag}]  {name:<16}  {lag}s</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
-async def main():
-    # Try to start healthcheck server (optional — needs aiohttp)
-    try:
-        import aiohttp
-        await healthcheck_server()
-    except ImportError:
-        log.info("aiohttp not installed — skipping healthcheck server")
+# ─── Entrypoint ───────────────────────────────────────────────
 
-    await run()
+async def run() -> None:
+    if not TELEGRAM_OK:
+        log.error("python-telegram-bot not installed. pip install 'python-telegram-bot[all]' httpx")
+        return
+    if not BOT_TOKEN:
+        log.error("NEXUS_BOT_TOKEN not set")
+        return
+    if not CHANNEL_ID:
+        log.error("NEXUS_CHANNEL_ID not set")
+        return
 
+    log.info(f"NEXUS Alert Bot  channel={CHANNEL_ID}  level={ST.min_level}+")
+
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("help",    cmd_help))
+    app.add_handler(CommandHandler("status",  cmd_status))
+    app.add_handler(CommandHandler("zone",    cmd_zone))
+    app.add_handler(CommandHandler("level",   cmd_level))
+    app.add_handler(CommandHandler("sources", cmd_sources))
+
+    async with app:
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        await poll_loop(app.bot)
+        await app.updater.stop()
+        await app.stop()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run())

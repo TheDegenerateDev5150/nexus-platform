@@ -16,6 +16,7 @@ import type { AgentTask } from "@/nexus/types";
 import TelegramIntelPanel from "./TelegramIntelPanel";
 import { MultiSourcePanel } from "./MultiSourcePanel";
 import { DarkWebPanel } from "./DarkWebPanel";
+import { PropagationGraph } from "./PropagationGraph";
 
 // ─── Design tokens ────────────────────────────────────────────
 
@@ -918,19 +919,22 @@ function TimelineTab() {
 
 function MatrixTab() {
   const alerts = useStore(s => s.nexusAlerts);
+  const selId  = useStore(s => s.nexusSelectedAlertId);
+  const setSelected = useStore(s => s.setNexusSelectedAlert);
+  const [view, setView] = useState<"matrix" | "propagation">("matrix");
 
   const ZONES = ["Tel Aviv", "Ukraine", "Mer Rouge", "Taiwan", "Sahel", "Moscou"];
 
   const SOURCES_MATRIX = [
-    { id: "aviation",    label: "ADS-B", color: "#3b82f6" },
-    { id: "maritime",    label: "AIS",   color: "#06b6d4" },
-    { id: "gpsjam",      label: "GPSGPSJ",  color: "#f97316" },
-    { id: "gdelt",       label: "GDELT", color: "#10b981" },
-    { id: "telegram",    label: "TG",    color: "#0088cc" },
-    { id: "satellite",   label: "SAR",   color: "#8b5cf6" },
-    { id: "usgs",        label: "USGS",  color: "#f59e0b" },
-    { id: "economic",    label: "MKTD",  color: "#84cc16" },
-    { id: "nightlights", label: "VIRS",  color: "#1e3a5f" },
+    { id: "aviation",    label: "ADS-B",   color: "#3b82f6" },
+    { id: "maritime",    label: "AIS",     color: "#06b6d4" },
+    { id: "gpsjam",      label: "GPSJ",    color: "#f97316" },
+    { id: "gdelt",       label: "GDELT",   color: "#10b981" },
+    { id: "bluesky",     label: "BSKY",    color: "#60a5fa" },
+    { id: "mastodon",    label: "MASTO",   color: "#a78bfa" },
+    { id: "rss_wire",    label: "WIRE",    color: "#4ade80" },
+    { id: "ransomwatch", label: "RANSOM",  color: "#dc2626" },
+    { id: "satellite",   label: "SAR",     color: "#8b5cf6" },
   ];
 
   function stableVal(seed: string): number {
@@ -974,68 +978,122 @@ function MatrixTab() {
   }));
 
   return (
-    <div style={{ padding: "8px 6px", overflowX: "auto" }}>
-      <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)", marginBottom: 8, letterSpacing: "0.06em" }}>
-        ZONE × SOURCE HEATMAP — NIVEAU D'ACTIVITÉ
+    <div style={{ padding: "8px 6px" }}>
+      {/* View switcher */}
+      <div style={{ display: "flex", gap: 1, marginBottom: 8 }}>
+        {(["matrix", "propagation"] as const).map(v => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            style={{
+              fontFamily: "var(--font-mono)", fontSize: 8,
+              padding: "3px 8px", border: "1px solid",
+              borderColor: view === v ? "var(--accent-cyan)" : "var(--border-subtle)",
+              background: view === v ? "rgba(34,211,238,0.08)" : "transparent",
+              color: view === v ? "var(--accent-cyan)" : "var(--text-muted)",
+              cursor: "pointer", borderRadius: 2, letterSpacing: "0.06em",
+            }}
+          >
+            {v === "matrix" ? "HEATMAP" : "PROPAGATION"}
+          </button>
+        ))}
       </div>
 
-      <div style={{ minWidth: 280 }}>
-        <div style={{ display: "flex", marginBottom: 3, paddingLeft: 64 }}>
-          {SOURCES_MATRIX.map(s => (
-            <div key={s.id} style={{ width: 24, textAlign: "center", fontFamily: "var(--font-mono)", fontSize: 6.5, color: s.color, fontWeight: 700, flexShrink: 0 }}>
-              {s.label.slice(0, 3)}
-            </div>
-          ))}
-        </div>
+      {view === "matrix" && (
+        <>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)", marginBottom: 8, letterSpacing: "0.06em" }}>
+            ZONE × SOURCE ACTIVITY
+          </div>
 
-        {matrix.map(row => {
-          const rowAlert = alerts.find(a => a.zone.toLowerCase().includes(row.zone.toLowerCase().split(" ")[0]));
-          const level = rowAlert?.level ?? 0;
-          const levelCfg = level >= 3 ? lc(level) : null;
-          return (
-            <div key={row.zone} style={{ display: "flex", alignItems: "center", marginBottom: 2 }}>
-              <div style={{
-                width: 60, flexShrink: 0, paddingRight: 4,
-                fontFamily: "var(--font-mono)", fontSize: 7.5,
-                color: levelCfg?.fg ?? "var(--text-muted)",
-                fontWeight: level >= 6 ? 700 : 400,
-                textAlign: "right",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-              }}>
-                {row.zone.length > 8 ? row.zone.slice(0, 8) : row.zone}
-              </div>
-              {row.values.map(cell => (
-                <div key={cell.source.id} style={{
-                  width: 24, height: 18, flexShrink: 0,
-                  background: heatColor(cell.value),
-                  border: "1px solid #0a0f1e",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  borderRadius: 1,
-                }}>
-                  {cell.value > 0.05 && (
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 6.5, color: textColor(cell.value), fontWeight: 700 }}>
-                      {Math.round(cell.value * 100)}
-                    </span>
-                  )}
+          <div style={{ minWidth: 280, overflowX: "auto" }}>
+            <div style={{ display: "flex", marginBottom: 3, paddingLeft: 64 }}>
+              {SOURCES_MATRIX.map(s => (
+                <div key={s.id} style={{ width: 24, textAlign: "center", fontFamily: "var(--font-mono)", fontSize: 6.5, color: s.color, fontWeight: 700, flexShrink: 0 }}>
+                  {s.label.slice(0, 4)}
                 </div>
               ))}
-              <div style={{ paddingLeft: 4, fontFamily: "var(--font-mono)", fontSize: 7.5, color: levelCfg?.fg ?? "var(--text-muted)", fontWeight: level >= 6 ? 700 : 400 }}>
-                {level >= 3 ? `L${level}` : ""}
-              </div>
             </div>
-          );
-        })}
 
-        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          {(([[0.10, "#334155", "0-20% bas"], [0.40, "#84cc16", "20-60% mod."], [0.75, "#f59e0b", "60-80% élevé"], [0.92, "#ef4444", "80-100% critique"]] as [number, string, string][])).map(([v, color, label]) => (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 3 }}>
-              <div style={{ width: 8, height: 8, background: heatColor(v), border: "1px solid #1e3a5f" }} />
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: color as string }}>{label}</span>
+            {matrix.map(row => {
+              const rowAlert = alerts.find(a => a.zone.toLowerCase().includes(row.zone.toLowerCase().split(" ")[0]));
+              const level = rowAlert?.level ?? 0;
+              const levelCfg = level >= 3 ? lc(level) : null;
+              return (
+                <div
+                  key={row.zone}
+                  style={{ display: "flex", alignItems: "center", marginBottom: 2, cursor: "pointer" }}
+                  onClick={() => { if (rowAlert) { setSelected(rowAlert.id); setView("propagation"); } }}
+                >
+                  <div style={{
+                    width: 60, flexShrink: 0, paddingRight: 4,
+                    fontFamily: "var(--font-mono)", fontSize: 7.5,
+                    color: levelCfg?.fg ?? "var(--text-muted)",
+                    fontWeight: level >= 6 ? 700 : 400,
+                    textAlign: "right", whiteSpace: "nowrap", overflow: "hidden",
+                  }}>
+                    {row.zone.length > 8 ? row.zone.slice(0, 8) : row.zone}
+                  </div>
+                  {row.values.map(cell => (
+                    <div key={cell.source.id} style={{
+                      width: 24, height: 18, flexShrink: 0,
+                      background: heatColor(cell.value),
+                      border: "1px solid #0a0f1e",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      borderRadius: 1,
+                    }}>
+                      {cell.value > 0.05 && (
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 6.5, color: textColor(cell.value), fontWeight: 700 }}>
+                          {Math.round(cell.value * 100)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  <div style={{ paddingLeft: 4, fontFamily: "var(--font-mono)", fontSize: 7.5, color: levelCfg?.fg ?? "var(--text-muted)", fontWeight: level >= 6 ? 700 : 400 }}>
+                    {level >= 3 ? `L${level}` : ""}
+                  </div>
+                </div>
+              );
+            })}
+
+            <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 7, color: "var(--text-muted)" }}>
+              Click a zone row to view propagation graph
             </div>
-          ))}
-        </div>
-      </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+              {(([[0.10, "#334155", "0-20%"], [0.40, "#84cc16", "20-60%"], [0.75, "#f59e0b", "60-80%"], [0.92, "#ef4444", "80-100%"]] as [number, string, string][])).map(([v, color, label]) => (
+                <div key={label} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                  <div style={{ width: 8, height: 8, background: heatColor(v), border: "1px solid #1e3a5f" }} />
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: color as string }}>{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {view === "propagation" && (
+        <>
+          {/* Alert selector */}
+          <div style={{ marginBottom: 6 }}>
+            <select
+              value={selId ?? ""}
+              onChange={e => setSelected(e.target.value)}
+              style={{
+                fontFamily: "var(--font-mono)", fontSize: 8, width: "100%",
+                background: "var(--bg-secondary)", border: "1px solid var(--border-medium)",
+                color: "var(--text-primary)", padding: "3px 6px", borderRadius: 2,
+              }}
+            >
+              {alerts.map(a => (
+                <option key={a.id} value={a.id}>
+                  LV{a.level} — {a.zone} — {a.signals.length} signals
+                </option>
+              ))}
+            </select>
+          </div>
+          <PropagationGraph />
+        </>
+      )}
     </div>
   );
 }

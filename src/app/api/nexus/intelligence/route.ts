@@ -1,21 +1,31 @@
 import { NextResponse } from "next/server";
+import { embed, enhancedJaccard } from "@/lib/embeddings";
+import { kvLPush, kvGet, kvSet } from "@/lib/kv";
 
 /**
  * NEXUS Master Intelligence Route
- * GET  /api/nexus/intelligence  → SSE stream: tous signaux toutes sources
- * POST /api/nexus/intelligence  → Ingest signal manuel
+ * GET  /api/nexus/intelligence  → SSE stream
+ * POST /api/nexus/intelligence  → Ingest manual signal
  *
- * Sources actives dans ce endpoint:
- * - GDELT 2.0 (15min) — events geopolitiques mondiaux
- * - ACLED (1h) — conflits armés géocodés
- * - USGS (30s) — séismes M4.5+
- * - Wikipedia (stream) — vélocité d'éditions
- * - NetBlocks (5min) — coupures Internet
- * - NASA FIRMS (3h) — incendies actifs
- * - GPSJam (5min) — brouillage GPS
- * - Yahoo Finance (1min) — anomalies marchés
- * - UN OCHA ReliefWeb (1h) — crises humanitaires
- * - Sentinel Hub (synthétique) — dommages satellite
+ * Active sources:
+ *   GDELT 2.0      (15min) — global geopolitical events
+ *   ACLED          (1h)    — georeferenced armed conflicts
+ *   USGS           (30s)   — M4.5+ earthquakes
+ *   Wikipedia      (2min)  — edit velocity early warning
+ *   NetBlocks      (5min)  — internet shutdown detection
+ *   NASA FIRMS     (1h)    — active fire detection
+ *   GPSJam         (5min)  — GPS jamming zones
+ *   Yahoo Finance  (1min)  — market anomaly detection
+ *   UN ReliefWeb   (1h)    — humanitarian crisis updates
+ *   RSS Feeds      (5min)  — AP/Reuters/AFP/Al Jazeera/BBC
+ *   Bluesky        (2min)  — OSINT community social feed
+ *   Mastodon       (3min)  — multi-instance conflict reporting
+ *   Ransomwatch    (30min) — critical infrastructure cyber threats
+ *
+ * Signal enrichment:
+ *   - Voyage AI embeddings attached to payload.embedding when VOYAGE_API_KEY set
+ *   - Signals stored to KV (Upstash) for CUSUM baseline computation
+ *   - Deduplication via 60-second seen-ID window
  */
 
 // ─── Types de signaux enrichis ────────────────────────────────
@@ -45,14 +55,43 @@ interface IntelSignal {
 const signalBuffer: IntelSignal[] = [];
 const MAX_BUFFER = 500;
 const clients = new Set<ReadableStreamDefaultController>();
+const seenSignalIds = new Set<string>();
 
-function broadcast(signal: IntelSignal) {
+// Deduplicate and broadcast. Attaches Voyage AI embedding if configured.
+async function broadcastEnriched(signal: IntelSignal): Promise<void> {
+  if (seenSignalIds.has(signal.id)) return;
+  seenSignalIds.add(signal.id);
+  // Bound dedup window
+  if (seenSignalIds.size > 5000) {
+    const iter = seenSignalIds.values();
+    for (let i = 0; i < 1000; i++) { const { value, done } = iter.next(); if (done) break; seenSignalIds.delete(value); }
+  }
+
+  // Attach embedding to payload for engine cosine similarity
+  try {
+    const vec = await embed(`${signal.title} ${signal.body}`.slice(0, 512));
+    if (vec) signal = { ...signal, rawData: { ...((signal.rawData as Record<string, unknown>) ?? {}), embedding: Array.from(vec) } };
+  } catch { /* embedding is optional */ }
+
   signalBuffer.unshift(signal);
   if (signalBuffer.length > MAX_BUFFER) signalBuffer.pop();
+
+  // Persist to KV for CUSUM baseline computation
+  kvLPush(`signals:${signal.source}`, {
+    id: signal.id, ts: signal.timestamp, lat: signal.lat, lng: signal.lng,
+    confidence: signal.confidence, zone: signal.zone,
+  }, 200).catch(() => {});
+
   const msg = `data: ${JSON.stringify({ type: "signal", data: signal })}\n\n`;
   clients.forEach(ctrl => {
-    try { ctrl.enqueue(new TextEncoder().encode(msg)); } catch {}
+    try { ctrl.enqueue(new TextEncoder().encode(msg)); } catch { clients.delete(ctrl); }
   });
+}
+
+// Synchronous broadcast for high-frequency sources (USGS, etc.)
+// Skips embedding to avoid latency.
+function broadcast(signal: IntelSignal): void {
+  broadcastEnriched(signal).catch(() => {});
 }
 
 // ─── Polling intervals ────────────────────────────────────────
@@ -61,7 +100,7 @@ let pollingStarted = false;
 const intervals: ReturnType<typeof setInterval>[] = [];
 
 // ─── GDELT 2.0 Poller ─────────────────────────────────────────
-// Murphy et al. 2024: GDELT = meilleure couverture médias mondiaux (15min)
+// Murphy et al. 2024: GDELT = best global media coverage (15min latency)
 
 const GDELT_QUERIES = [
   "explosion OR strike OR airstrike OR frappe",
@@ -456,6 +495,133 @@ async function pollReliefWeb() {
   } catch {}
 }
 
+// ─── RSS Feed Poller ──────────────────────────────────────────
+// Aggregates AP, Reuters, Al Jazeera, BBC, Kyiv Independent, ReliefWeb.
+// All feeds public. Urgency threshold 0.55 to avoid noise.
+
+async function pollRSS() {
+  try {
+    const res = await fetch(`${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/api/rss?minUrgency=0.55&limit=30`, {
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) return;
+    const data = await res.json() as { items: Array<{ id: string; sourceName: string; title: string; description: string; pubDate: string; lat: number; lng: number; country: string; zone: string; urgency: number; tags: string[] }> };
+    for (const item of data.items ?? []) {
+      broadcast({
+        id:          item.id,
+        source:      "rss_wire",
+        sourceName:  item.sourceName,
+        category:    "NEWS_WIRE",
+        lat:         item.lat,
+        lng:         item.lng,
+        country:     item.country,
+        zone:        item.zone,
+        confidence:  item.urgency,
+        title:       item.title,
+        body:        item.description,
+        tags:        item.tags,
+        timestamp:   item.pubDate,
+        isAnomaly:   item.urgency >= 0.80,
+      });
+    }
+  } catch {}
+}
+
+// ─── Bluesky Poller ───────────────────────────────────────────
+// Bluesky public AppView API — no authentication.
+// OSINT community has migrated significantly post-2024.
+
+async function pollBluesky() {
+  try {
+    const res = await fetch(`${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/api/bluesky?minUrgency=0.50&limit=25`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return;
+    const data = await res.json() as { posts: Array<{ id: string; authorHandle: string; text: string; createdAt: string; lat: number; lng: number; country: string; zone: string; urgency: number; likeCount: number; repostCount: number; tags: string[] }> };
+    for (const post of data.posts ?? []) {
+      broadcast({
+        id:          post.id,
+        source:      "bluesky",
+        sourceName:  `Bluesky — ${post.authorHandle}`,
+        category:    "SOCIAL_BLUESKY",
+        lat:         post.lat,
+        lng:         post.lng,
+        country:     post.country,
+        zone:        post.zone,
+        confidence:  post.urgency,
+        title:       `${post.authorHandle}: ${post.text.slice(0, 80)}`,
+        body:        post.text,
+        tags:        post.tags,
+        timestamp:   post.createdAt,
+        isAnomaly:   post.likeCount > 500 || post.repostCount > 100,
+      });
+    }
+  } catch {}
+}
+
+// ─── Mastodon Poller ──────────────────────────────────────────
+// Multi-instance: mastodon.social, infosec.exchange, kolektiva.social, mastodon.online
+
+async function pollMastodon() {
+  try {
+    const res = await fetch(`${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/api/mastodon?minUrgency=0.45&limit=25`, {
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) return;
+    const data = await res.json() as { posts: Array<{ id: string; instance: string; authorHandle: string; text: string; createdAt: string; lat: number; lng: number; country: string; zone: string; urgency: number; boostsCount: number; tags: string[] }> };
+    for (const post of data.posts ?? []) {
+      broadcast({
+        id:          post.id,
+        source:      "mastodon",
+        sourceName:  `${post.instance} — ${post.authorHandle}`,
+        category:    "SOCIAL_MASTODON",
+        lat:         post.lat,
+        lng:         post.lng,
+        country:     post.country,
+        zone:        post.zone,
+        confidence:  post.urgency,
+        title:       `${post.authorHandle} [${post.instance}]: ${post.text.slice(0, 80)}`,
+        body:        post.text,
+        tags:        post.tags,
+        timestamp:   post.createdAt,
+        isAnomaly:   post.boostsCount > 50,
+      });
+    }
+  } catch {}
+}
+
+// ─── Ransomwatch Poller ───────────────────────────────────────
+// github.com/joshhighet/ransomwatch — critical infrastructure cyber threats.
+// Polls hourly. Only surfaces high-value targets (score >= 0.70).
+
+async function pollRansomwatch() {
+  try {
+    const res = await fetch(`${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/api/ransomwatch?minScore=0.70&hours=24&limit=20`, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return;
+    const data = await res.json() as { posts: Array<{ id: string; group: string; title: string; discovered: string; sector: string; country: string; lat: number; lng: number; zone: string; nexusScore: number; tags: string[] }> };
+    for (const post of data.posts ?? []) {
+      broadcast({
+        id:          post.id,
+        source:      "ransomwatch",
+        sourceName:  `Ransomwatch — ${post.group}`,
+        category:    "CYBER_THREAT",
+        lat:         post.lat,
+        lng:         post.lng,
+        country:     post.country,
+        zone:        post.zone,
+        confidence:  post.nexusScore,
+        title:       `[${post.group}] ${post.title}`,
+        body:        `Sector: ${post.sector} | Group: ${post.group}`,
+        tags:        post.tags,
+        timestamp:   post.discovered,
+        isAnomaly:   post.nexusScore >= 0.85,
+      });
+    }
+  } catch {}
+}
+
 // ─── Start all pollers ────────────────────────────────────────
 
 function startPollers() {
@@ -472,17 +638,25 @@ function startPollers() {
   pollWikipedia();
   pollReliefWeb();
   pollNetBlocks();
+  pollRSS();
+  pollBluesky();
+  pollMastodon();
+  pollRansomwatch();
 
   // Recurring polls
-  intervals.push(setInterval(pollGDELT,             900_000));   // 15min
-  intervals.push(setInterval(pollACLED,            3600_000));   // 1h
-  intervals.push(setInterval(pollUSGS,               30_000));   // 30s
-  intervals.push(setInterval(pollFIRMS,           3600_000));    // 1h
-  intervals.push(setInterval(pollGPSJam,            300_000));   // 5min
-  intervals.push(setInterval(pollFinancialAnomalies, 60_000));   // 1min
-  intervals.push(setInterval(pollWikipedia,         120_000));   // 2min
-  intervals.push(setInterval(pollReliefWeb,        3600_000));   // 1h
-  intervals.push(setInterval(pollNetBlocks,         300_000));   // 5min
+  intervals.push(setInterval(pollGDELT,              900_000));  // 15min
+  intervals.push(setInterval(pollACLED,             3600_000));  // 1h
+  intervals.push(setInterval(pollUSGS,                30_000));  // 30s
+  intervals.push(setInterval(pollFIRMS,            3600_000));   // 1h
+  intervals.push(setInterval(pollGPSJam,             300_000));  // 5min
+  intervals.push(setInterval(pollFinancialAnomalies,  60_000));  // 1min
+  intervals.push(setInterval(pollWikipedia,          120_000));  // 2min
+  intervals.push(setInterval(pollReliefWeb,         3600_000));  // 1h
+  intervals.push(setInterval(pollNetBlocks,           300_000)); // 5min
+  intervals.push(setInterval(pollRSS,                300_000));  // 5min
+  intervals.push(setInterval(pollBluesky,            120_000));  // 2min
+  intervals.push(setInterval(pollMastodon,           180_000));  // 3min
+  intervals.push(setInterval(pollRansomwatch,       1800_000));  // 30min
 }
 
 // ─── SSE Handler ──────────────────────────────────────────────

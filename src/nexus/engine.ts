@@ -67,16 +67,101 @@ function classifyCategory(signals: NexusSignal[]): AlertCategory {
   return best;
 }
 
-// ─── Semantic similarity — Jaccard on token sets ─────────────
+// ─── Semantic similarity ──────────────────────────────────────
+//
+// Two-tier strategy:
+//   1. Cosine similarity on pre-computed embeddings (server-side Voyage AI)
+//      Embeddings are attached to signal.payload.embedding as a plain number[]
+//      when the intelligence route processes them before broadcasting.
+//   2. Enhanced Jaccard fallback with synonym expansion and bigrams.
+//      Used when embeddings are not present.
+
+const SYNONYMS_ENGINE: Record<string, string[]> = {
+  strike:      ["airstrike", "frappe", "bombing", "attack", "hit", "strike"],
+  explosion:   ["blast", "detonation", "explosion", "explosive", "boom"],
+  missile:     ["rocket", "projectile", "munition", "warhead", "ballistic"],
+  vessel:      ["ship", "tanker", "cargo", "freighter", "boat", "vessel"],
+  troops:      ["soldiers", "military", "forces", "army", "battalion", "brigade"],
+  shutdown:    ["outage", "offline", "blackout", "disruption", "down"],
+  evacuation:  ["evacuate", "withdrawal", "retreat", "fleeing", "displaced"],
+};
+
+function expandToken(token: string): string[] {
+  for (const [canonical, syns] of Object.entries(SYNONYMS_ENGINE)) {
+    if (token === canonical || syns.includes(token)) return [canonical, ...syns];
+  }
+  return [token];
+}
+
+function enhancedTokenSet(s: NexusSignal): Set<string> {
+  const tokens = [
+    ...s.description.toLowerCase().split(/\W+/).filter(w => w.length > 3),
+    ...(s.tags ?? []),
+  ];
+  const expanded = new Set<string>();
+  tokens.forEach(tok => expandToken(tok).forEach(e => expanded.add(e)));
+  // Bigrams — capture "air strike", "red sea", etc.
+  for (let i = 0; i < tokens.length - 1; i++) {
+    expanded.add(`${tokens[i]}_${tokens[i + 1]}`);
+  }
+  return expanded;
+}
+
+function cosineSim(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na  += a[i] * a[i];
+    nb  += b[i] * b[i];
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb);
+  return denom === 0 ? 0 : Math.max(0, Math.min(1, dot / denom));
+}
 
 function semSimilarity(a: NexusSignal, b: NexusSignal): number {
-  const tokenize = (s: NexusSignal) =>
-    new Set([...s.description.toLowerCase().split(/\W+/), ...(s.tags ?? [])].filter(w => w.length > 3));
-  const ta    = tokenize(a);
-  const tb    = tokenize(b);
+  // Prefer cosine on pre-computed embeddings
+  const embA = a.payload?.embedding as number[] | undefined;
+  const embB = b.payload?.embedding as number[] | undefined;
+  if (embA && embB && embA.length > 0 && embA.length === embB.length) {
+    return cosineSim(embA, embB);
+  }
+  // Fallback: enhanced Jaccard
+  const ta    = enhancedTokenSet(a);
+  const tb    = enhancedTokenSet(b);
   const inter = [...ta].filter(x => tb.has(x)).length;
   const union = new Set([...ta, ...tb]).size;
   return union === 0 ? 0 : inter / union;
+}
+
+// ─── Zone adjacency graph ─────────────────────────────────────
+//
+// Connected regions: activations in adjacent zones trigger a meta-event
+// score boost of +0.08 to the behavioral dimension.
+// Rationale: a simultaneous flare in Red Sea + Ormuz is a different
+// threat picture than each zone in isolation.
+
+const ZONE_ADJACENCY: Map<string, string[]> = new Map([
+  ["Red Sea",           ["Strait of Hormuz", "Yemen", "Aden", "Gulf of Aden"]],
+  ["Strait of Hormuz",  ["Red Sea", "Iran", "Gulf", "UAE"]],
+  ["Lebanon",           ["Israel/Palestine", "Syria", "Gaza"]],
+  ["Israel/Palestine",  ["Lebanon", "Gaza", "Syria", "Jordan"]],
+  ["Gaza",              ["Israel/Palestine", "Egypt", "Sinai"]],
+  ["Ukraine",           ["Russia", "Belarus", "Poland", "Black Sea"]],
+  ["Russia",            ["Ukraine", "Belarus", "Baltic", "Kaliningrad"]],
+  ["Taiwan Strait",     ["China", "South China Sea", "Philippines"]],
+  ["Korean Peninsula",  ["China", "Japan", "North Korea"]],
+  ["Sahel",             ["Mali", "Niger", "Libya", "Sudan"]],
+]);
+
+export function zoneAdjacencyBoost(zones: string[]): number {
+  let boost = 0;
+  for (const zone of zones) {
+    const adjacent = ZONE_ADJACENCY.get(zone) ?? [];
+    const overlap  = adjacent.filter(adj => zones.some(z => z.includes(adj) || adj.includes(z)));
+    if (overlap.length > 0) boost += 0.08;
+  }
+  return Math.min(0.20, boost);
 }
 
 // ─── Zone registry ───────────────────────────────────────────
