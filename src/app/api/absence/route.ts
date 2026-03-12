@@ -74,7 +74,10 @@ async function detectAdsbVoids(): Promise<AbsenceZone[]> {
           detectedAt: new Date().toISOString(),
           confidenceScore: Math.min(0.97, 0.70 + dropPct / 300),
           dropPercent: Math.round(dropPct),
-          durationMin: Math.floor(Math.random() * 45) + 15,
+          // Duration estimated from drop severity:
+          // mild drop (70-80%) → ~15min, severe (>90%) → ~60min.
+          // Formula: 15 + (dropPct - 70) * 1.5, capped at 90min.
+          durationMin: Math.min(90, Math.round(15 + (dropPct - 70) * 1.5)),
           militaryContext: dropPct > 85,
           nexusSignalStrength: Math.min(0.97, 0.70 + dropPct / 300),
           baselineTraffic: baseline,
@@ -90,35 +93,17 @@ async function detectAdsbVoids(): Promise<AbsenceZone[]> {
 }
 
 async function detectDarkShips(): Promise<AbsenceZone[]> {
-  const DARK_SHIP_DEMO: AbsenceZone[] = [
-    {
-      id: "dark_hodeida",
-      type: "AIS_DARK",
-      lat: 14.8, lng: 42.7, radiusKm: 120,
-      label: "DARK SHIP — Hodeida corridor",
-      country: "YE",
-      detectedAt: new Date(Date.now() - 5400000).toISOString(),
-      confidenceScore: 0.88, dropPercent: 87, durationMin: 90,
-      militaryContext: true, nexusSignalStrength: 0.88,
-      baselineTraffic: 24, currentTraffic: 3,
-    },
-    {
-      id: "dark_malacca",
-      type: "AIS_DARK",
-      lat: 1.3, lng: 103.8, radiusKm: 150,
-      label: "DARK SHIP — Malacca Strait",
-      country: "SG",
-      detectedAt: new Date(Date.now() - 900000).toISOString(),
-      confidenceScore: 0.78, dropPercent: 76, durationMin: 15,
-      militaryContext: false, nexusSignalStrength: 0.78,
-      baselineTraffic: 180, currentTraffic: 42,
-    },
-  ];
-
-  if (process.env.AISSTREAM_API_KEY) {
-    return DARK_SHIP_DEMO;
+  // Without AIS real-time data, we cannot detect dark ships.
+  // AISStream.io real-time WebSocket requires AISSTREAM_API_KEY (free registration).
+  // https://aisstream.io/
+  if (!process.env.AISSTREAM_API_KEY) {
+    return []; // Honest empty — no fake dark ship detections
   }
-  return DARK_SHIP_DEMO;
+
+  // With AIS key: baseline vs current traffic per zone is computed dynamically.
+  // For now returns empty — the real-time WebSocket collector (nexus_telegram_collector.py)
+  // feeds AIS dark ship events through /api/darkweb/ingest when running.
+  return [];
 }
 
 async function detectInternetShutdowns(): Promise<AbsenceZone[]> {

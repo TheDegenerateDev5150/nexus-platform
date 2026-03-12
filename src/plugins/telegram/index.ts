@@ -43,7 +43,8 @@ function getCoords(regions: string[]): [number, number] {
     );
     if (key) return ZONE_COORDS[key];
   }
-  return [20.0 + (Math.random() - 0.5) * 60, 20.0 + (Math.random() - 0.5) * 80];
+  // Fallback: unknown region defaults to geographic centroid of active conflict zones
+  return [27.0, 42.0]; // Arabian Peninsula / Horn of Africa midpoint
 }
 
 const DEMO_MESSAGES: Record<string, { texts: string[]; zone: string }> = {
@@ -60,26 +61,35 @@ function generateEntities(): TelegramSignalEntity[] {
   const channels = NEXUS_CHANNELS.filter(ch => ch.credibilityScore >= 70).slice(0, 25);
   return channels.map(ch => {
     const coords = getCoords(ch.region);
+    // Use channel index to pick a fixed text variant — no random each render
     const demo = DEMO_MESSAGES[ch.handle];
-    const text = demo
-      ? demo.texts[Math.floor(Math.random() * demo.texts.length)]
-      : `${ch.handle} — ${ch.specialties.slice(0, 2).join(", ")}`;
+    const textIdx = Math.abs(ch.handle.split("").reduce((h, c) => h * 31 + c.charCodeAt(0), 0)) % (demo?.texts.length ?? 1);
+    const text = demo ? demo.texts[textIdx] : `${ch.handle} — ${ch.specialties.slice(0, 2).join(", ")}`;
     const zone = demo?.zone ?? (ch.region[0] ?? "Global");
+
+    // messageCount derived from credibilityScore — more credible channels
+    // tend to publish more (active monitoring).
+    const baseCount = Math.round((ch.credibilityScore / 100) * 60) + 10;
+
+    // Timestamp staggered by credibility tier so higher-credibility
+    // channels appear more recent (active monitoring).
+    const staleness = (100 - ch.credibilityScore) * 12 * 1000; // 0–1200s
+
     return {
       id: `tg-${ch.handle}`,
       channelHandle: ch.handle,
       channelName: ch.name,
-      lat: coords[0] + (Math.random() - 0.5) * 1.5,
-      lng: coords[1] + (Math.random() - 0.5) * 1.5,
+      lat: coords[0],
+      lng: coords[1],
       zone,
       country: ch.region[0] ?? "XX",
       credibilityScore: ch.credibilityScore,
       bias: ch.bias,
-      messageCount: Math.floor(Math.random() * 80) + 10,
+      messageCount: baseCount,
       latestText: text,
       isFirst: ch.firstMoverScore >= 80,
       urgencyScore: Math.min(1, ch.credibilityScore / 100 + (ch.medianLeadTimeMinutes < 0 ? 0.15 : 0)),
-      timestamp: new Date(Date.now() - Math.random() * 1800000),
+      timestamp: new Date(Date.now() - staleness),
     };
   });
 }
@@ -124,10 +134,11 @@ export class TelegramPlugin implements WorldPlugin {
 
   async fetch(_timeRange: TimeRange): Promise<GeoEntity[]> {
     if (Date.now() - this.lastFetch < 60000 && this.cache.length > 0) {
+      // Increment messageCount by 1 per poll cycle (realistic monitoring rate)
       return this.cache.map(e => ({
         ...e,
         timestamp: new Date(),
-        properties: { ...e.properties, messageCount: (e.properties.messageCount as number) + Math.floor(Math.random() * 5) },
+        properties: { ...e.properties, messageCount: (e.properties.messageCount as number) + 1 },
       }));
     }
     try {

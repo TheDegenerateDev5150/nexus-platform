@@ -48,12 +48,18 @@ function generateDemoVessels(): GeoEntity[] {
         { name: "NORTHERN SPIRIT", mmsi: "257038700", type: "fishing", lat: 62.4, lon: 6.1, speed: 5.0, heading: 170 },
     ];
 
-    // Add slight random jitter to make it feel alive
-    return vessels.map((v) => ({
+    // Dead reckoning: advance position based on heading and speed.
+    // 1 knot = 1.852 km/h = 0.000278 deg/min at equator.
+    // We simulate ~5 minute polling interval.
+    const POLL_MIN = 5;
+    return vessels.map((v) => {
+        const headingRad = v.heading * Math.PI / 180;
+        const distDeg = v.speed * 1.852 / 60 * POLL_MIN / 111;
+        return {
         id: `maritime-${v.mmsi}`,
         pluginId: "maritime",
-        latitude: v.lat + (Math.random() - 0.5) * 0.1,
-        longitude: v.lon + (Math.random() - 0.5) * 0.1,
+        latitude: v.lat + distDeg * Math.cos(headingRad),
+        longitude: v.lon + distDeg * Math.sin(headingRad) / Math.max(0.1, Math.cos(v.lat * Math.PI / 180)),
         heading: v.heading,
         speed: v.speed,
         timestamp: new Date(),
@@ -65,7 +71,7 @@ function generateDemoVessels(): GeoEntity[] {
             speed_knots: v.speed,
             heading: v.heading,
         },
-    }));
+    }; });
 }
 
 export class MaritimePlugin implements WorldPlugin {

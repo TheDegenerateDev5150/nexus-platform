@@ -125,17 +125,32 @@ export async function GET(req: Request) {
   if (country) events = events.filter(e => e.iso === country);
   if (event_type) events = events.filter(e => e.event_type.toLowerCase().includes(event_type.toLowerCase()));
 
-  // Add some live-ness: vary timestamps
-  const enriched = events.map(e => ({
-    ...e,
-    timestamp: new Date(Date.now() - Math.random() * days * 86400000).toISOString(),
-    confidence: 0.85 + Math.random() * 0.12,
-    nexus_score: {
-      lda_conflict: 0.70 + Math.random() * 0.25,
-      views_level: Math.floor(Math.random() * 4) + 5,
-      behavioral_anomaly: Math.random() > 0.7,
-    },
-  }));
+  // Add live-ness: timestamps spread across the requested window.
+  // Confidence and nexus scores are deterministic from event properties —
+  // no randomness, so identical API responses are reproducible.
+  const enriched = events.map((e, i) => {
+    // Spread events evenly across the window (oldest first)
+    const slotMs = (days * 86_400_000) / events.length;
+    const offsetMs = i * slotMs + (slotMs * 0.1); // slight offset within slot
+    const ldaConflict = e.event_type.includes("Battle") ? 0.88
+      : e.event_type.includes("Explosions") ? 0.92
+      : e.event_type.includes("Violence") ? 0.79
+      : 0.71;
+    const viewsLevel = e.fatalities > 20 ? 8
+      : e.fatalities > 5 ? 7
+      : e.fatalities > 0 ? 6
+      : 5;
+    return {
+      ...e,
+      timestamp: new Date(Date.now() - offsetMs).toISOString(),
+      confidence: e.source_scale === "International" ? 0.93 : 0.82,
+      nexus_score: {
+        lda_conflict: ldaConflict,
+        views_level: viewsLevel,
+        behavioral_anomaly: e.event_type.includes("Explosions") || e.fatalities > 10,
+      },
+    };
+  });
 
   return NextResponse.json({
     source: "ACLED_DEMO",

@@ -170,18 +170,18 @@ function StatusBar() {
 type Tab = "alerts"|"signals"|"sources"|"markets"|"swarm"|"report"|"telegram"|"intel"|"live"|"timeline"|"matrix"|"darkweb";
 
 const TABS: Array<{ id: Tab; label: string }> = [
-  { id: "alerts",   label: "ALERTES"  },
-  { id: "signals",  label: "SIGNAUX"  },
-  { id: "live",     label: "LIVE 35+" },
-  { id: "markets",  label: "MARCHÉS"  },
-  { id: "swarm",    label: "SWARM"    },
-  { id: "report",   label: "RAPPORT"  },
-  { id: "sources",  label: "SOURCES"  },
-  { id: "telegram", label: "BOT"      },
-  { id: "intel",    label: "TG INTEL" },
-  { id: "timeline", label: "TIMELINE" },
-  { id: "matrix",   label: "MATRIX"   },
-  { id: "darkweb",  label: "🧅 DARK"  },
+  { id: "alerts",   label: "ALERTS"  },
+  { id: "signals",  label: "SIGNALS" },
+  { id: "live",     label: "LIVE"    },
+  { id: "markets",  label: "MARKETS" },
+  { id: "swarm",    label: "SWARM"   },
+  { id: "report",   label: "REPORT"  },
+  { id: "sources",  label: "SOURCES" },
+  { id: "telegram", label: "BOT"     },
+  { id: "intel",    label: "INTEL"   },
+  { id: "timeline", label: "TIMELINE"},
+  { id: "matrix",   label: "MATRIX"  },
+  { id: "darkweb",  label: "DARK"    },
 ];
 
 function TabBar({ active, onSelect }: { active: Tab; onSelect: (t: Tab) => void }) {
@@ -191,18 +191,18 @@ function TabBar({ active, onSelect }: { active: Tab; onSelect: (t: Tab) => void 
   const running = tasks.filter(t => t.status === "running").length;
 
   const badge: Partial<Record<Tab, string|number>> = {
-    alerts:   alerts.filter(a => !a.acknowledged).length,
-    signals:  useStore.getState().nexusLiveSignals.length,
-    live:     "🔴",
-    sources:  "22",
+    alerts:   alerts.filter(a => !a.acknowledged).length || "—",
+    signals:  useStore.getState().nexusLiveSignals.length || "—",
+    live:     "LIVE",
+    sources:  "35+",
     markets:  "6",
-    swarm:    running > 0 ? `${running}▶` : tasks.length,
-    report:   reports.length,
-    telegram: "●",
+    swarm:    running > 0 ? `${running}` : tasks.length || "—",
+    report:   reports.length || "—",
+    telegram: "92",
     intel:    "92",
-    timeline: "⏱",
-    matrix:   "6×9",
-    darkweb:  "🧅",
+    timeline: "—",
+    matrix:   "9x11",
+    darkweb:  "TOR",
   };
 
   return (
@@ -270,7 +270,7 @@ function AlertCard({ alert, selected, onSelect }: { alert: NexusAlert; selected:
           ))}
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)", marginLeft: 3 }}>{alert.signals.length} sig</span>
           {alert.swarmActive && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: "#f59e0b", background: "rgba(245,158,11,0.1)", padding: "0 4px", borderRadius: 2, marginLeft: "auto", animation: "nexusPulse 1.5s ease-in-out infinite" }}>⚙ SWARM</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: "var(--accent-amber)", padding: "0 4px", borderRadius: 2, border: "1px solid rgba(217,119,6,0.2)", marginLeft: "auto" }}>SWARM</span>
           )}
         </div>
       )}
@@ -280,7 +280,7 @@ function AlertCard({ alert, selected, onSelect }: { alert: NexusAlert; selected:
         <>
           {/* AI Summary */}
           <div style={{ padding: "6px 8px", background: "rgba(34,211,238,0.04)", border: "1px solid rgba(34,211,238,0.12)", borderRadius: 5, marginBottom: 8, fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-            🤖 {alert.aiSummary}
+            AI ANALYSIS: {alert.aiSummary}
           </div>
 
           {/* Signals list */}
@@ -320,7 +320,7 @@ function AlertCard({ alert, selected, onSelect }: { alert: NexusAlert; selected:
             <div style={{ marginBottom: 8 }}>
               {alert.historicalMatches.map((m, i) => (
                 <div key={i} style={{ padding: "3px 7px", background: "var(--bg-tertiary)", borderRadius: 4, marginBottom: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-secondary)" }}>⏱ {m.name} ({m.date})</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-secondary)" }}>TIME {m.name} ({m.date})</span>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--accent-cyan)", fontWeight: 700 }}>{Math.round(m.similarity*100)}%</span>
                 </div>
               ))}
@@ -329,13 +329,13 @@ function AlertCard({ alert, selected, onSelect }: { alert: NexusAlert; selected:
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 4 }}>
-            <button onClick={e => { e.stopPropagation(); fly(); }} style={actionBtn("cyan")}>🗺 GLOBE</button>
+            <button onClick={e => { e.stopPropagation(); fly(); }} style={actionBtn("cyan")}>GLOBE</button>
             {!alert.acknowledged && (
               <button onClick={e => { e.stopPropagation(); ack(alert.id); }} style={actionBtn("green")}>✓ ACK</button>
             )}
-            <button onClick={e => { e.stopPropagation(); gen(alert.id); setTab("report"); }} style={actionBtn("amber")}>📄 RAPPORT</button>
+            <button onClick={e => { e.stopPropagation(); gen(alert.id); setTab("report"); }} style={actionBtn("amber")}>RPT RAPPORT</button>
             {alert.swarmActive && (
-              <button onClick={e => { e.stopPropagation(); setTab("swarm"); }} style={actionBtn("orange")}>⚙ SWARM</button>
+              <button onClick={e => { e.stopPropagation(); setTab("swarm"); }} style={actionBtn("orange")}>AGT SWARM</button>
             )}
           </div>
         </>
@@ -553,7 +553,7 @@ function MarketsTab() {
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700, color: "var(--text-primary)" }}>{src.icon}</span>
               <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>{src.platform}</span>
-              {src.hot && <span style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: "#ef4444", background: "rgba(239,68,68,0.12)", padding: "0 4px", borderRadius: 2, animation: "nexusPulse 1s ease-in-out infinite" }}>HOT</span>}
+              {src.hot && <span style={{ fontFamily: "var(--font-mono)", fontSize: 7, color: "var(--accent-red)", padding: "0 4px", borderRadius: 2, border: "1px solid rgba(220,38,38,0.3)" }}>HIGH</span>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Spark data={src.trend} color={src.hot ? "#ef4444" : "#22d3ee"} height={16} />
@@ -566,10 +566,10 @@ function MarketsTab() {
         </div>
       ))}
 
-      <div style={{ marginTop: 8, padding: "5px 8px", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 4 }}>
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "#f59e0b", lineHeight: 1.6 }}>
-          💡 Pétrole +12% AND GPS jamming Ormuz → +0.18 score NEXUS{"\n"}
-          BDI -18% AND AIS dark Mer Rouge → Pattern Déc 2023 (83%)
+      <div style={{ marginTop: 8, padding: "5px 8px", background: "rgba(107,114,128,0.06)", border: "1px solid var(--border-subtle)", borderRadius: 2 }}>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+          Brent +12% + GPS jamming Ormuz → spatial weight +0.18{"\n"}
+          BDI -18% + AIS dark Red Sea → historical match Dec 2023 (similarity: 0.83)
         </div>
       </div>
     </div>
@@ -579,11 +579,11 @@ function MarketsTab() {
 // ─── SWARM TAB ────────────────────────────────────────────────
 
 const TASK_META: Record<string, { icon: string; label: string; desc: string }> = {
-  collect:   { icon: "📦", label: "COLLECT",   desc: "Archivage caches avant expiration" },
-  archive:   { icon: "🔒", label: "ARCHIVE",   desc: "Archive immuable SHA256" },
-  translate: { icon: "🌐", label: "TRANSLATE", desc: "Traduction 50 langues" },
-  geolocate: { icon: "📍", label: "GEOLOCATE", desc: "Géolocalisation médias OSINT" },
-  report:    { icon: "📄", label: "REPORT",    desc: "Génération rapport PDF" },
+  collect:   { icon: "COL", label: "COLLECT",   desc: "Cache archival before expiry" },
+  archive:   { icon: "ARC", label: "ARCHIVE",   desc: "Immutable archive SHA-256" },
+  translate: { icon: "TRL", label: "TRANSLATE", desc: "50 language translation" },
+  geolocate: { icon: "GEO", label: "GEOLOCATE", desc: "Media geolocation OSINT" },
+  report:    { icon: "RPT", label: "REPORT",    desc: "PDF report generation" },
 };
 
 const STATUS_C: Record<string, string> = {
@@ -610,8 +610,8 @@ function SwarmTab() {
       {/* Swarm header */}
       <div style={{ padding: "8px 10px", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: "var(--radius-md)", marginBottom: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 700, color: "#f59e0b" }}>⚙ AGENT SWARM</span>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: running > 0 ? "#f59e0b" : "#4ade80", animation: running > 0 ? "nexusPulse 1.5s ease-in-out infinite" : "none" }}>{running > 0 ? `${running} ACTIF${running>1?"S":""}` : "IDLE"}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 700, color: "#f59e0b" }}>AGT AGENT SWARM</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: running > 0 ? "var(--accent-amber)" : "var(--text-secondary)" }}>{running > 0 ? `${running} ACTIVE` : "IDLE"}</span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, background: "var(--border-subtle)", borderRadius: 4, overflow: "hidden" }}>
           {[
@@ -628,9 +628,9 @@ function SwarmTab() {
       </div>
 
       {/* Auto-trigger note */}
-      <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)", padding: "4px 8px", background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)", borderRadius: 4, marginBottom: 10, lineHeight: 1.6 }}>
-        ⚡ Seuil de déclenchement automatique: score ≥ 88% (niveau 8+){"\n"}
-        Agents: collect · archive · translate · geolocate → report
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)", padding: "4px 8px", background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)", borderRadius: 2, marginBottom: 10, lineHeight: 1.6 }}>
+        Auto-trigger: correlation score ≥ 0.88 (level 8+){"\n"}
+        Pipeline: collect → archive → translate → geolocate → report
       </div>
 
       {/* Tasks by event */}
@@ -656,7 +656,7 @@ function SwarmTab() {
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 700, color: sc }}>{meta.label}</span>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)" }}>{meta.desc}</span>
                     </div>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: sc, fontWeight: 700, animation: isRunning ? "nexusPulse 1s ease-in-out infinite" : "none" }}>{task.status.toUpperCase()}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: sc, fontWeight: 700 }}>{task.status.toUpperCase()}</span>
                   </div>
                   {isRunning && (
                     <div style={{ height: 3, background: "var(--bg-tertiary)", borderRadius: 2, overflow: "hidden" }}>
@@ -768,7 +768,7 @@ function TelegramTab() {
     <div style={{ padding: "8px 10px" }}>
       {/* Bot status */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "rgba(0,136,204,0.07)", border: "1px solid rgba(0,136,204,0.18)", borderRadius: "var(--radius-md)", marginBottom: 10 }}>
-        <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg,#0088cc,#00b4e8)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>✈</div>
+        <div style={{ width: 30, height: 30, borderRadius: 2, background: "var(--bg-tertiary)", border: "1px solid var(--border-medium)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontFamily: "var(--font-mono)", color: "var(--accent-cyan)", flexShrink: 0 }}>TG</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: 11, color: "var(--text-primary)" }}>@nexus_intel_bot</div>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -796,7 +796,7 @@ function TelegramTab() {
             </div>
             <p style={{ fontFamily: "var(--font-mono)", fontSize: 8.5, color: "var(--text-secondary)", margin: 0, lineHeight: 1.55 }}>{n.summary}</p>
             <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
-              {["🗺 Globe", "📄 Rapport", "✓ OK", "🔕 2h"].map(a => (
+              {["🗺 Globe", "RPT Rapport", "✓ OK", "🔕 2h"].map(a => (
                 <button key={a} style={{ padding: "2px 5px", background: "var(--bg-tertiary)", border: "1px solid var(--border-subtle)", borderRadius: 3, color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: 7.5, cursor: "pointer" }}>{a}</button>
               ))}
             </div>
@@ -863,7 +863,7 @@ function TimelineTab() {
   ].sort((a, b) => b.ts.getTime() - a.ts.getTime());
 
   const TYPE_ICONS: Record<TimelineEvent["type"], string> = {
-    ALERT: "🔴", SIGNAL: "◆", REPORT: "📄", ACK: "✓",
+    ALERT: "LIVE", SIGNAL: "◆", REPORT: "RPT", ACK: "✓",
   };
 
   return (
@@ -924,7 +924,7 @@ function MatrixTab() {
   const SOURCES_MATRIX = [
     { id: "aviation",    label: "ADS-B", color: "#3b82f6" },
     { id: "maritime",    label: "AIS",   color: "#06b6d4" },
-    { id: "gpsjam",      label: "GPS⚡",  color: "#f97316" },
+    { id: "gpsjam",      label: "GPSGPSJ",  color: "#f97316" },
     { id: "gdelt",       label: "GDELT", color: "#10b981" },
     { id: "telegram",    label: "TG",    color: "#0088cc" },
     { id: "satellite",   label: "SAR",   color: "#8b5cf6" },
@@ -1133,17 +1133,17 @@ export function NexusPanel() {
     }}>
       {/* Header */}
       <div style={{ padding: "7px 12px", background: "var(--bg-secondary)", borderBottom: "1px solid var(--border-subtle)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          {critical > 0 && <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", boxShadow: "0 0 8px #ef4444", animation: "nexusPulse 0.9s ease-in-out infinite", flexShrink: 0 }} />}
-          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: 10.5, color: "var(--text-primary)", letterSpacing: "0.12em" }}>NEXUS</span>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--text-muted)" }}>INTELLIGENCE v3</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Critical indicator — only shown if active alerts */}
+          {critical > 0 && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent-red)", animation: "nexusPulse 1.4s ease-in-out infinite", flexShrink: 0 }} />}
+          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, color: "var(--text-primary)", letterSpacing: "0.14em" }}>NEXUS</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {running > 0 && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "#f59e0b", background: "rgba(245,158,11,0.1)", padding: "2px 5px", borderRadius: 3, animation: "nexusPulse 1.5s ease-in-out infinite" }}>⚙ {running}</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--accent-amber)", padding: "2px 5px", borderRadius: 2, border: "1px solid rgba(217,119,6,0.2)" }}>{running} AGENT{running > 1 ? "S" : ""}</span>
           )}
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: critical > 0 ? "#ef4444" : "#4ade80", background: critical > 0 ? "rgba(239,68,68,0.1)" : "rgba(74,222,128,0.08)", padding: "2px 6px", borderRadius: 3, animation: critical > 0 ? "nexusPulse 1.5s ease-in-out infinite" : "none", fontWeight: 700 }}>
-            {critical > 0 ? `${critical} CRITIQUE${critical > 1 ? "S" : ""}` : "NOMINAL"}
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: critical > 0 ? "var(--accent-red)" : "var(--text-secondary)", padding: "2px 6px", borderRadius: 2, border: `1px solid ${critical > 0 ? "rgba(220,38,38,0.25)" : "var(--border-subtle)"}`, fontWeight: critical > 0 ? 600 : 400 }}>
+            {critical > 0 ? `${critical} CRITICAL` : "NOMINAL"}
           </span>
         </div>
       </div>

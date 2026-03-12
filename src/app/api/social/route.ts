@@ -53,10 +53,15 @@ export async function GET() {
         const data = await res.json();
         // Transform to NexusPost format
         (data.data || []).forEach((tweet: Record<string, unknown>) => {
+          // Twitter v2 API returns geo.coordinates.coordinates = [lng, lat]
+          // when the user has location enabled. Absent = null.
+          const geo = tweet.geo as { coordinates?: { coordinates?: [number, number] } } | null;
+          const [tweetLng, tweetLat] = geo?.coordinates?.coordinates ?? [0, 0];
           posts.push({
             id: `x-${tweet.id}`,
             platform: "social_x",
-            lat: 0, lng: 0, // TODO: reverse geocode from tweet.geo
+            lat: tweetLat,
+            lng: tweetLng,
             text: tweet.text,
             author: `@user_${tweet.author_id}`,
             verified: false,
@@ -72,20 +77,14 @@ export async function GET() {
     }
   }
 
-  // ─── Demo fallback ────────────────────────────────────────
+  // ─── No demo fallback — if no API keys, return honest empty ──
   if (posts.length === 0) {
-    const now = new Date();
-    const demoData = [
-      { id: "x-demo-1", platform: "social_x",        lat: 32.08, lng: 34.78, text: "BREAKING: Multiple explosions heard in Tel Aviv. Sirens active across the city.", author: "@BreakingNews_IL", verified: true,  timestamp: new Date(now.getTime() - 5 * 60000),  urgencyScore: 0.92, mediaCount: 2,  shareCount: 14200 },
-      { id: "tg-demo-1", platform: "social_telegram", lat: 32.08, lng: 34.78, text: "מספר פיצוצים בתל אביב. כוחות פועלים. פינוי אזורים מסוימים.", author: "@IDF_Updates", verified: true,  timestamp: new Date(now.getTime() - 3 * 60000),  urgencyScore: 0.95, mediaCount: 0,  shareCount: 0 },
-      { id: "tt-demo-1", platform: "social_tiktok",   lat: 31.5,  lng: 34.45, text: "[CV: smoke detected, military vehicles, crowd dispersal] — Gaza border area", author: "@witness_gaza_88", verified: false, timestamp: new Date(now.getTime() - 8 * 60000),  urgencyScore: 0.78, mediaCount: 1,  shareCount: 45000 },
-      { id: "vk-demo-1", platform: "social_vk",       lat: 55.75, lng: 37.62, text: "Срочно: Военная активность на Ближнем Востоке резко возросла. Источники указывают на...", author: "mil_analytics_ru", verified: false, timestamp: new Date(now.getTime() - 12 * 60000), urgencyScore: 0.65, mediaCount: 0, shareCount: 2300 },
-      { id: "r-demo-1",  platform: "social_reddit",   lat: 24.0,  lng: 122.0, text: "USNS Comfort and multiple destroyers spotted near Taiwan Strait. Fleet movement unusual.", author: "u/navywatcher", verified: false, timestamp: new Date(now.getTime() - 20 * 60000), urgencyScore: 0.71, mediaCount: 3, shareCount: 8900 },
-      { id: "wb-demo-1", platform: "social_weibo",    lat: 24.0,  lng: 122.0, text: "台湾海峡附近军事活动异常增加，多艘驱逐舰被目击", author: "军事观察_cn", verified: false, timestamp: new Date(now.getTime() - 15 * 60000), urgencyScore: 0.68, mediaCount: 1, shareCount: 0 },
-      { id: "tg-demo-2", platform: "social_telegram", lat: 17.57, lng: -3.99,  text: "Wagner group convoys reactivated Northern Mali. 12 vehicles spotted on Timbuktu road.", author: "@AfricaIntel", verified: true, timestamp: new Date(now.getTime() - 40 * 60000), urgencyScore: 0.80, mediaCount: 0, shareCount: 0 },
-      { id: "tg-demo-3", platform: "social_telegram", lat: 15.55, lng: 42.55,  text: "Houthis: 'We will strike any vessel entering designated zones. Final warning issued.'", author: "@HouthiOfficial", verified: false, timestamp: new Date(now.getTime() - 90 * 60000), urgencyScore: 0.74, mediaCount: 0, shareCount: 0 },
-    ];
-    return NextResponse.json({ posts: demoData, source: "demo" });
+    return NextResponse.json({
+      posts: [],
+      source: "no_credentials",
+      reason: "Configure TWITTER_BEARER_TOKEN or REDDIT_CLIENT_ID to receive live social signals.",
+      hint: "Reddit is free: https://www.reddit.com/prefs/apps — VK basic scraping also available",
+    }, { status: 200 });
   }
 
   return NextResponse.json({ posts, source: "live" });

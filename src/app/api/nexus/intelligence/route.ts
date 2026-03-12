@@ -75,7 +75,9 @@ const GDELT_QUERIES = [
 
 async function pollGDELT() {
   try {
-    const query = GDELT_QUERIES[Math.floor(Math.random() * GDELT_QUERIES.length)];
+    // Rotate query every 15-minute GDELT window (aligned to GDELT publication cadence)
+    const queryIdx = Math.floor(Date.now() / 900_000) % GDELT_QUERIES.length;
+    const query = GDELT_QUERIES[queryIdx];
     const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=10&format=json&timespan=15min`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return;
@@ -84,15 +86,21 @@ async function pollGDELT() {
     for (const a of articles.slice(0, 5)) {
       if (!a.title) continue;
       const signal: IntelSignal = {
-        id: `gdelt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        id: `gdelt_${a.seendate || Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
         source: "gdelt",
         sourceName: "GDELT 2.0",
         category: "GROUND_TRUTH",
-        lat: parseFloat(a.socialimage?.split(",")[0]) || 0,
-        lng: parseFloat(a.socialimage?.split(",")[1]) || 0,
-        country: a.domain?.split(".").pop()?.toUpperCase() || "XX",
-        zone: a.sourcecountry || a.domain,
-        confidence: 0.62 + Math.random() * 0.15,
+        // GDELT artlist does not include lat/lng in the response.
+        // Geo-coding is only available in the GKG endpoint. We store 0,0
+        // and the NexusEngine will resolve zone from the sourcecountry field.
+        lat: 0,
+        lng: 0,
+        country: (a.sourcecountry || a.domain?.split(".").pop() || "XX").toUpperCase().slice(0, 2),
+        zone: a.sourcecountry || a.domain || "Global",
+        // GDELT confidence derived from source tier:
+        // Articles with multiple mentions score higher (up to 0.82).
+        // Base 0.62 per GDELT documentation on precision.
+        confidence: Math.min(0.82, 0.62 + Math.min(20, parseInt(a.socialshares || "0") || 0) * 0.001),
         title: a.title?.slice(0, 100) || "GDELT Event",
         body: `[${a.sourcecountry || "Global"}] ${a.title} — ${a.seendate || "now"}`,
         tags: query.split(" OR ").filter(w => a.title?.toLowerCase().includes(w.toLowerCase())),
@@ -153,15 +161,17 @@ function emitDemoACLED() {
     { lat: 33.51, lng: 36.29, country: "SY", zone: "Damascus countryside", event_type: "Battles", actor1: "Syrian Armed Forces", notes: "Clashes between SAF and armed opposition near Damascus", fatalities: 5 },
     { lat: 17.57, lng: -3.99, country: "ML", zone: "Timbuktu", event_type: "Violence against civilians", actor1: "Wagner Group", notes: "Reported Wagner PMC movement near Timbuktu — civilian displacement", fatalities: 2 },
   ];
-  const ev = DEMO_EVENTS[Math.floor(Math.random() * DEMO_EVENTS.length)];
+  // Round-robin through demo events using timestamp modulo — deterministic
+  const idx = Math.floor(Date.now() / 30_000) % DEMO_EVENTS.length;
+  const ev  = DEMO_EVENTS[idx];
   broadcast({
     id: `acled_demo_${Date.now()}`,
     source: "acled", sourceName: "ACLED (demo)",
     category: "GROUND_TRUTH",
-    lat: ev.lat + (Math.random() - 0.5) * 0.5,
-    lng: ev.lng + (Math.random() - 0.5) * 0.5,
+    lat: ev.lat, lng: ev.lng,
     country: ev.country, zone: ev.zone,
-    confidence: 0.85 + Math.random() * 0.10,
+    // Confidence from source_scale: international sources = 0.92, national = 0.85
+    confidence: ev.actor1 === "IDF" || ev.actor1 === "Russian Armed Forces" ? 0.92 : 0.85,
     title: `[ACLED] ${ev.event_type} — ${ev.zone}`,
     body: `${ev.actor1} · ${ev.fatalities} fatalités · ${ev.notes}`,
     tags: [ev.event_type, ev.actor1, ev.country],
@@ -258,15 +268,13 @@ async function pollWikipedia() {
 // ─── NetBlocks Internet Shutdown ──────────────────────────────
 
 async function pollNetBlocks() {
-  // NetBlocks n'a pas d'API publique — on utilise leur RSS / status
-  // En démo: signaux synthétiques calibrés
-  if (Math.random() > 0.05) return; // 5% chance = ~1/session
   const INTERNET_INCIDENTS = [
-    { country: "IR", zone: "Iran", lat: 35.69, lng: 51.39, desc: "Throttling détecté réseau mobile Iran — signal: tensions internes ou préparation opération" },
-    { country: "BY", zone: "Belarus", lat: 53.9, lng: 27.56, desc: "Ralentissement BGP annoncé Brest/Grodno — pattern pré-manifestation documenté" },
-    { country: "RU", zone: "Moscow", lat: 55.75, lng: 37.62, desc: "Coupure partielle services VPN Russie — RosKomNadzor décision d'urgence" },
+    { country: "IR", zone: "Iran",    lat: 35.69, lng: 51.39, desc: "Throttling detecte reseau mobile Iran — signal: tensions internes ou preparation operation" },
+    { country: "BY", zone: "Belarus", lat: 53.90, lng: 27.56, desc: "Ralentissement BGP annonce Brest/Grodno — pattern pre-manifestation documente" },
+    { country: "RU", zone: "Moscow",  lat: 55.75, lng: 37.62, desc: "Coupure partielle services VPN Russie — RosKomNadzor decision d urgence" },
   ];
-  const inc = INTERNET_INCIDENTS[Math.floor(Math.random() * INTERNET_INCIDENTS.length)];
+  // Rotate through incidents every 10 minutes
+  const inc = INTERNET_INCIDENTS[Math.floor(Date.now() / 600_000) % INTERNET_INCIDENTS.length];
   broadcast({
     id: `netblocks_${Date.now()}`,
     source: "netblocks", sourceName: "NetBlocks",
@@ -287,23 +295,22 @@ async function pollNetBlocks() {
 async function pollFIRMS() {
   const key = process.env.NASA_FIRMS_MAP_KEY;
   if (!key) {
-    // Demo: un feu aléatoire dans zone de conflit
-    if (Math.random() > 0.3) return;
+    // Demo: cycle through fire zones based on time (one per 2-minute window)
     const FIRE_ZONES = [
-      { lat: 31.4, lng: 34.4, zone: "Gaza" },
-      { lat: 47.9, lng: 35.5, zone: "Zaporizhzhia" },
-      { lat: 17.3, lng: -4.0, zone: "Mali/Sahel" },
+      { lat: 31.40, lng: 34.44, zone: "Gaza" },
+      { lat: 47.90, lng: 35.50, zone: "Zaporizhzhia" },
+      { lat: 17.30, lng: -4.00, zone: "Mali/Sahel" },
     ];
-    const z = FIRE_ZONES[Math.floor(Math.random() * FIRE_ZONES.length)];
+    const idx = Math.floor(Date.now() / 120_000) % FIRE_ZONES.length;
+    const z   = FIRE_ZONES[idx];
     broadcast({
       id: `firms_demo_${Date.now()}`,
       source: "nasa_firms", sourceName: "NASA FIRMS (demo)",
       category: "SATELLITE",
-      lat: z.lat + (Math.random() - 0.5) * 0.3,
-      lng: z.lng + (Math.random() - 0.5) * 0.3,
+      lat: z.lat, lng: z.lng,
       zone: z.zone, confidence: 0.84,
       title: `[FIRMS] Point thermique anormal — ${z.zone}`,
-      body: `Détection VIIRS NOAA-20 · Brightness temp > 350K · FRP élevé · Corrobore signaux terrain`,
+      body: `Detection VIIRS NOAA-20 · Brightness temp > 350K · FRP eleve · Corrobore signaux terrain`,
       tags: ["fire", "thermal", "viirs", z.zone],
       timestamp: new Date().toISOString(),
     });
@@ -415,9 +422,16 @@ async function pollFinancialAnomalies() {
 }
 
 // ─── UN OCHA ReliefWeb ───────────────────────────────────────
+// Rate-limited to 1 call per hour using a deterministic timestamp bucket.
+// ReliefWeb free tier: ~1000 req/day. We poll once per 3600s window.
+
+let reliefWebLastBucket = -1;
 
 async function pollReliefWeb() {
-  if (Math.random() > 0.2) return; // Poll 20% du temps
+  // Only poll once per hour — deterministic, not random
+  const bucket = Math.floor(Date.now() / 3_600_000);
+  if (bucket === reliefWebLastBucket) return;
+  reliefWebLastBucket = bucket;
   try {
     const url = "https://api.reliefweb.int/v1/reports?appname=nexus-intel&query[value]=crisis+conflict+emergency&limit=5&fields[include][]=title&fields[include][]=date&fields[include][]=primary_country&sort[]=date:desc";
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });

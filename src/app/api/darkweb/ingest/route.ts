@@ -211,7 +211,7 @@ export async function POST(req: Request) {
 
     const signal: DarkWebSignal = {
       ...body,
-      id: body.id || `ingest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id: body.id || `ingest_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
       timestamp: body.timestamp || new Date().toISOString(),
     };
 

@@ -1,13 +1,105 @@
 import { NextResponse } from "next/server";
-export async function GET() {
-  const now = new Date();
-  const cameras = [
-    { id: "cam-il-1",  type: "traffic",      name: "Ayalon Highway — Tel Aviv",   lat: 32.07, lng: 34.79, city: "Tel Aviv",   country: "IL", isLive: true, cvDetections: ["smoke","emergency vehicles","crowd"], cvConfidence: 0.84, isAlertProximity: true,  lastUpdate: new Date(now.getTime() - 120000).toISOString() },
-    { id: "cam-il-2",  type: "webcam",       name: "Tel Aviv Port — EarthCam",    lat: 32.10, lng: 34.77, city: "Tel Aviv",   country: "IL", isLive: true, cvDetections: ["military vehicles"],                  cvConfidence: 0.71, isAlertProximity: true,  lastUpdate: new Date(now.getTime() - 300000).toISOString() },
-    { id: "cam-yt-1",  type: "youtube_live", name: "Jerusalem Live Feed",         lat: 31.78, lng: 35.22, city: "Jerusalem", country: "IL", isLive: true, cvDetections: ["crowd","police"],                     cvConfidence: 0.62, isAlertProximity: true,  lastUpdate: new Date(now.getTime() - 60000).toISOString() },
-    { id: "cam-nyc-1", type: "traffic",      name: "Times Square DOT Camera",     lat: 40.76, lng:-73.99, city: "New York",   country: "US", isLive: true, cvDetections: [],                                     cvConfidence: 0,    isAlertProximity: false, lastUpdate: new Date(now.getTime() - 30000).toISOString() },
-    { id: "cam-sg-1",  type: "port",         name: "Singapore Port Authority",    lat:  1.27, lng:103.82, city: "Singapore", country: "SG", isLive: true, cvDetections: [],                                     cvConfidence: 0,    isAlertProximity: false, lastUpdate: new Date(now.getTime() - 45000).toISOString() },
-    { id: "cam-tw-1",  type: "weather",      name: "Keelung Port — Windy Webcam", lat: 25.13, lng:121.73, city: "Keelung",   country: "TW", isLive: true, cvDetections: [],                                     cvConfidence: 0,    isAlertProximity: true,  lastUpdate: new Date(now.getTime() - 480000).toISOString() },
-  ];
-  return NextResponse.json({ cameras, source: "demo" });
+
+/**
+ * Public Camera Discovery
+ *
+ * Sources:
+ * - EarthCam public API (no key needed): https://api.earthcam.com/oapi/cameras
+ * - Windy.com webcam API (free tier): https://api.windy.com/webcams/api/v3
+ *   (WINDY_API_KEY — free at windy.com/webcams/developers)
+ * - OpenStreetMap Overpass for public CCTV nodes (no key)
+ *
+ * Camera stream URLs are public. No CV analysis without a separate vision model.
+ * CV detection fields are ONLY populated by a separate Python worker.
+ */
+
+async function fetchEarthCamPublic() {
+  try {
+    const res = await fetch(
+      "https://api.earthcam.com/oapi/cameras?client_key=xxxx&country=US,IL,TW,SG&limit=20",
+      { signal: AbortSignal.timeout(6000), next: { revalidate: 300 } } as RequestInit
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.cameras || []).map((c: Record<string, unknown>) => ({
+      id:     `earthcam-${c.id}`,
+      type:   "webcam",
+      name:   c.title,
+      lat:    c.gps?.lat ?? 0,
+      lng:    c.gps?.lng ?? 0,
+      city:   c.location?.city ?? "",
+      country:c.location?.country ?? "",
+      isLive: true,
+      streamUrl: c.embed_url,
+      source: "earthcam.com",
+      cvDetections:   [],  // populated by Python CV worker only
+      cvConfidence:   0,
+      isAlertProximity: false,
+      lastUpdate: new Date().toISOString(),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchWindyCams(apiKey: string, lat: number, lng: number, radius = 200) {
+  try {
+    const res = await fetch(
+      `https://api.windy.com/webcams/api/v3/webcams?lang=en&limit=10&offset=0&categories=location&nearby=${lat},${lng},${radius}`,
+      {
+        headers: { "x-windy-api-key": apiKey },
+        signal: AbortSignal.timeout(6000),
+        next: { revalidate: 300 },
+      } as RequestInit
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.webcams || []).map((c: Record<string, unknown>) => ({
+      id:     `windy-${c.id}`,
+      type:   "webcam",
+      name:   c.title,
+      lat:    (c.location as Record<string, number>)?.latitude  ?? 0,
+      lng:    (c.location as Record<string, number>)?.longitude ?? 0,
+      city:   (c.location as Record<string, string>)?.city ?? "",
+      country:(c.location as Record<string, string>)?.country ?? "",
+      isLive: (c.status as string) === "active",
+      streamUrl: (c.images as Record<string, string>)?.current?.preview ?? null,
+      source: "windy.com",
+      cvDetections:   [],
+      cvConfidence:   0,
+      isAlertProximity: false,
+      lastUpdate: new Date().toISOString(),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const lat    = parseFloat(searchParams.get("lat")    ?? "32.08");
+  const lng    = parseFloat(searchParams.get("lng")    ?? "34.78");
+  const radius = parseInt(searchParams.get("radius")   ?? "300");
+
+  const windyKey = process.env.WINDY_API_KEY;
+  const cameras: unknown[] = [];
+
+  if (windyKey) {
+    const windyCams = await fetchWindyCams(windyKey, lat, lng, radius);
+    cameras.push(...windyCams);
+  }
+
+  // EarthCam — try regardless
+  const earthCams = await fetchEarthCamPublic();
+  cameras.push(...earthCams);
+
+  if (cameras.length === 0) {
+    return NextResponse.json({
+      cameras: [],
+      source: "no_credentials",
+      reason: "Configure WINDY_API_KEY (free at windy.com/webcams/developers) for live camera feeds.",
+    }, { status: 200 });
+  }
+
+  return NextResponse.json({ cameras, source: windyKey ? "windy+earthcam" : "earthcam", count: cameras.length });
 }

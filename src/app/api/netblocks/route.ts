@@ -103,7 +103,7 @@ export async function GET() {
   const cloudflareEvents = await checkCloudflareRadar();
   const allEvents = cloudflareEvents.length > 0
     ? cloudflareEvents
-    : DEMO_SHUTDOWN_EVENTS.slice(0, Math.floor(Math.random() * 2) + 1);
+    : DEMO_SHUTDOWN_EVENTS; // serve all demo events consistently
 
   return NextResponse.json({
     source: cloudflareEvents.length > 0 ? "CLOUDFLARE_RADAR_LIVE" : "NETBLOCKS_DEMO",

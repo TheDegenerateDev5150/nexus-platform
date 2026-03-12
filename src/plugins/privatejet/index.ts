@@ -165,11 +165,17 @@ export class PrivateJetPlugin implements WorldPlugin {
       }
     } catch {}
 
-    return PRIVATE_JETS_DEMO.map(j => ({
-      ...jetToEntity(j),
-      latitude: j.lat + (Math.random() - 0.5) * 0.05,
-      longitude: j.lng + (Math.random() - 0.5) * 0.05,
-    }));
+    // Dead reckoning: advance position from speed+heading (5-min poll interval).
+    // Aircraft on ground (speed=0) stay fixed.
+    return PRIVATE_JETS_DEMO.map(j => {
+      const headingRad = j.heading * Math.PI / 180;
+      const distDeg = j.speed > 0 ? (j.speed / 1.852) * 1.852 / 60 * 5 / 111 : 0; // km → deg
+      return {
+        ...jetToEntity(j),
+        latitude:  j.lat + distDeg * Math.cos(headingRad),
+        longitude: j.lng + distDeg * Math.sin(headingRad) / Math.max(0.1, Math.cos(j.lat * Math.PI / 180)),
+      };
+    });
   }
 
   getPollingInterval(): number {
